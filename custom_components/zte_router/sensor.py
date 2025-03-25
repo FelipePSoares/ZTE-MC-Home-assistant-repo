@@ -303,12 +303,29 @@ class ZTERouterSensor(ZTERouterEntity):
         if self.coordinator.data:
             new_state = self.coordinator.data.get(self._key, None)
             if new_state is not None:
+                if "pci" in self._key.lower():
+                    try:
+                        if isinstance(new_state, str):
+                            new_state = int(new_state, 16)
+                            _LOGGER.debug(
+                                f"Converted hex PCI value to decimal for key '{self._key}': {new_state}"
+                            )
+                    except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            f"Failed to convert value for key '{self._key}' (expected hex string): {new_state}"
+                        )
                 self._state = new_state
-                _LOGGER.info(f"Sensor {self._name} updated. Old state: {old_state}, New state: {self._state}")
+                _LOGGER.info(
+                    f"Sensor '{self._name}' updated. Old state: {old_state}, New state: {self._state}"
+                )
             else:
-                _LOGGER.warning(f"No new data for sensor {self._name}. Retaining last state: {self._state}")
+                _LOGGER.debug(
+                    f"No value found for key '{self._key}' in coordinator data."
+                )
         else:
-            _LOGGER.warning(f"No data available from coordinator for sensor {self._name}. Retaining last state: {self._state}")
+            _LOGGER.warning(
+                f"No coordinator data available for sensor '{self._name}'. Retaining last state."
+            )
         self.async_write_ha_state()
 
 class LastSMSSensor(ZTERouterEntity):
