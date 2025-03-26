@@ -455,20 +455,41 @@ class LastSMSSensor(ZTERouterEntity):
             return date_str
 
 
-def format_ca_bands(ca_bands, nr5g_action_band):
-    if not ca_bands:
-        return "No CA"
-    ca_bands_list = ca_bands.split(";")
-    ca_bands_formatted = []
-    for band in ca_bands_list:
-        band_info = band.split(",")
-        if len(band_info) >= 6:
-            band_id = band_info[3]  # Use the appropriate index for the band identifier
-            bandwidth = band_info[5]
-            ca_bands_formatted.append(f"B{band_id}(@{bandwidth}Mhz)")
-    if nr5g_action_band:
-        ca_bands_formatted.append(f"{nr5g_action_band}")
-    return "+".join(ca_bands_formatted)
+    def format_ca_bands(ca_bands, nr5g_action_band):
+        _LOGGER.debug(f"Raw ca_bands input: {ca_bands}")
+        _LOGGER.debug(f"Raw nr5g_action_band input: {nr5g_action_band}")
+        
+        if not ca_bands:
+            _LOGGER.debug("No CA bands provided. Returning 'No CA'")
+            return "No CA"
+        
+        ca_bands_list = ca_bands.split(";")
+        _LOGGER.debug(f"Parsed CA bands list: {ca_bands_list}")
+        
+        ca_bands_formatted = []
+        
+        for band in ca_bands_list:
+            band_info = band.split(",")
+            _LOGGER.debug(f"Parsing CA band string: {band} -> split: {band_info}")
+            if len(band_info) >= 6:
+                try:
+                    band_id = band_info[3]
+                    bandwidth = band_info[5]
+                    formatted_band = f"B{band_id}(@{bandwidth}Mhz)"
+                    ca_bands_formatted.append(formatted_band)
+                    _LOGGER.debug(f"Formatted band: {formatted_band}")
+                except Exception as e:
+                    _LOGGER.warning(f"Failed to format band '{band}' due to: {e}")
+            else:
+                _LOGGER.warning(f"Band info has insufficient parts: {band_info}")
+                
+        if nr5g_action_band:
+            ca_bands_formatted.append(f"{nr5g_action_band}")
+            _LOGGER.debug(f"Appended NR5G action band: {nr5g_action_band}")
+            
+        formatted_result = "+".join(ca_bands_formatted)
+        _LOGGER.debug(f"Final formatted CA bands string: {formatted_result}")
+        return formatted_result
 
 class ConnectedBandsSensor(ZTERouterEntity):
     def __init__(self, coordinator, disabled_by_default=False):
