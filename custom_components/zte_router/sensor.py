@@ -454,8 +454,7 @@ class LastSMSSensor(ZTERouterEntity):
             _LOGGER.error(f"Error parsing date string {date_str}: {e}")
             return date_str
 
-
-    def format_ca_bands(ca_bands, nr5g_action_band):
+def format_ca_bands(ca_bands, nr5g_action_band):
         _LOGGER.debug(f"Raw ca_bands input: {ca_bands}")
         _LOGGER.debug(f"Raw nr5g_action_band input: {nr5g_action_band}")
         
