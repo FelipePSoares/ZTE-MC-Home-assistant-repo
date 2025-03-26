@@ -62,15 +62,16 @@ Supported models:
 - MC888
 - MC888A
 
+Models with Username should work now, and thats are non A models
+
 ![SCreenshot](https://raw.githubusercontent.com/Kajkac/ZTE-MC-Home-assistant-repo/main/zte.png)
 
 ## Bugs: 
-1. Username currently not supported
-2. Errors in Home Assistant log - They are for now present until I polish the addon
+
+1. Errors in Home Assistant log - They are for now present until I polish the addon
 2. Various errors in sensors etc. - This integration is classified as beta right now but can be tested by anyone. 
-4. For suggestions, please open a new issue
-5. I will push new builds as soon I will have more time. Make sure you "star" this integration. 
-6. If u wanna donate for beer, let me know :P 
+3. For suggestions, please open a new issue
+4. I will push new builds as soon I will have more time. Make sure you "star" this integration. 
 
 ## Contributors
 If u have any suggestion, or you are doing pull requests and adding new features, increment the version number by 1 in manifest.json, so that GitHub automation automatically creates a new release.
