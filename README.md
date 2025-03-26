@@ -36,7 +36,6 @@ This repository contains the ZTE Router custom integration and an add-on to depl
 **Method 1**
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Kajkac&repository=ZTE-MC-Home-assistant-repo&category=integration) 
-- Work in Progress (waiting for [this](https://github.com/hacs/default/pull/2662) HACS PR to be completed)
 
 **Method 2**
 1. `HACS` > `Integrations` > `⋮` > `Custom Repositories`
