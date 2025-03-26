@@ -723,61 +723,40 @@ class zteRouter:
             logger.error(f"Failed to disconnect from data network: {e}")
             return None
 
-    def setdata_5G_SA(self):
-        logger.debug("Setting data to 5G SA mode")
+    def setdata_mode(self, BearerPreference):
+        logger.debug(f"Setting data mode with BearerPreference: {BearerPreference}")
         try:
             # Get LD and update cookies
             LD = self.get_LD()
-            # getCookie will update self.cookies
             self.getCookie(username=self.username, password=self.password, LD=LD)
-            # AD value
+
+            # Get AD value
             AD = self.get_AD()
+
+            # Build headers
             header = {"Referer": self.referer}
             cookie_header = self.build_cookie_header()
             if cookie_header:
                 header['Cookie'] = cookie_header
+
+            # Prepare payload
             payload = {
                 'isTest': 'false',
                 'goformId': 'SET_BEARER_PREFERENCE',
-                'BearerPreference': 'Only_5G',
+                'BearerPreference': BearerPreference,
                 'AD': AD
             }
             encoded_payload = urllib.parse.urlencode(payload)
             body = encoded_payload.encode('utf-8')
+
+            # Send request
             r = s.request('POST', self.referer + "goform/goform_set_cmd_process", headers=header, body=body)
-            logger.info(f"Set data to 5G SA mode with status code: {r.status}")
+            logger.info(f"Set data mode '{BearerPreference}' with status code: {r.status}")
             return r.status
         except Exception as e:
-            logger.error(f"Failed to set data to 5G SA mode: {e}")
+            logger.error(f"Failed to set data mode '{BearerPreference}': {e}")
             return None
 
-    def setdata_5G_NSA(self):
-        logger.debug("Setting data to 5G NSA mode")
-        try:
-            # Get LD and update cookies
-            LD = self.get_LD()
-            # getCookie will update self.cookies
-            self.getCookie(username=self.username, password=self.password, LD=LD)
-            # AD value
-            AD = self.get_AD()
-            header = {"Referer": self.referer}
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
-            payload = {
-                'isTest': 'false',
-                'goformId': 'SET_BEARER_PREFERENCE',
-                'BearerPreference': 'LTE_AND_5G',
-                'AD': AD
-            }
-            encoded_payload = urllib.parse.urlencode(payload)
-            body = encoded_payload.encode('utf-8')
-            r = s.request('POST', self.referer + "goform/goform_set_cmd_process", headers=header, body=body)
-            logger.info(f"Set data to 5G NSA mode with status code: {r.status}")
-            return r.status
-        except Exception as e:
-            logger.error(f"Failed to set data to 5G NSA mode: {e}")
-            return None
 
 
 # Global variables for SMS sending
@@ -898,11 +877,19 @@ if __name__ == "__main__":
             result = zte.disconnect_data()
             print(result)
         elif command == 11:
-            result = zte.setdata_5G_SA()
+            result = zte.setdata_mode("Only_LTE")
             print(result)
         elif command == 12:
-            result = zte.setdata_5G_NSA()
+            result = zte.setdata_mode("4G_AND_5G")
             print(result)
+        elif command == 13:
+            result = zte.setdata_mode("LTE_AND_5G")
+            print(result)
+        elif command == 14:
+            result = zte.setdata_mode("Only_5G")
+            print(result)
+        elif command == 15:
+            result = zte.setdata_mode("WL_AND_5G")
         else:
             print(f"Invalid command: {command}")
             sys.exit(1)

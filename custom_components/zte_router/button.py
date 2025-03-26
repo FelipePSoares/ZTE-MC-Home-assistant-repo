@@ -33,8 +33,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         ZTERouterButton(main_coordinator, ip_entry, password_entry, username_entry, None, None, "Delete All SMS", "5"),
         ZTERouterButton(main_coordinator, ip_entry, password_entry, username_entry, None, None, "Connect Data", "9"),
         ZTERouterButton(main_coordinator, ip_entry, password_entry, username_entry, None, None, "Disconnect Data", "10"),
-        ZTERouterButton(main_coordinator, ip_entry, password_entry, username_entry, None, None, "Set 5G SA", "11"),
-        ZTERouterButton(main_coordinator, ip_entry, password_entry, username_entry, None, None, "Set 5G NSA", "12")
+        ZTERouterButton(main_coordinator, ip_entry, password_entry, username_entry, None, None, "Set LTE", "11"),
+        ZTERouterButton(main_coordinator, ip_entry, password_entry, username_entry, None, None, "Set 5G SA/NSA/LTE", "12"),
+        ZTERouterButton(main_coordinator, ip_entry, password_entry, username_entry, None, None, "Set 5G NSA", "13"),
+        ZTERouterButton(main_coordinator, ip_entry, password_entry, username_entry, None, None, "Set 5G SA", "14"),
+        ZTERouterButton(main_coordinator, ip_entry, password_entry, username_entry, None, None, "Set Auto", "15")
     ], False)
 
 class ZTERouterButton(CoordinatorEntity, ButtonEntity):
