@@ -467,30 +467,68 @@ class zteRouter:
             return ""
 
     def zteinfo3(self):
-        logger.debug("Fetching ZTE info 3")
-        try:
-            # Get LD and update cookies
-            LD = self.get_LD()
-            # getCookie will update self.cookies
-            self.getCookie(username=self.username, password=self.password, LD=LD)
-            header = {
-                "Host": self.ip,
-                "Referer": f"{self.referer}index.html",
-            }
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
-            cmd_url = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&multi_data=1&sms_received_flag_flag=0&sts_received_flag_flag=0&cmd=wa_inner_version%2Ccr_version%2Cnetwork_type%2Crssi%2Crscp%2Crmcc%2Crmnc%2Cenodeb_id%2Clte_rsrq%2Clte_rsrp%2CZ5g_snr%2CZ5g_rsrp%2CZCELLINFO_band%2CZ5g_dlEarfcn%2Clte_ca_pcell_arfcn%2Clte_ca_pcell_band%2Clte_ca_scell_band%2Clte_ca_pcell_bandwidth%2Clte_ca_scell_info%2Clte_ca_scell_bandwidth%2Cwan_lte_ca%2Clte_pci%2CZ5g_CELL_ID%2CZ5g_SINR%2Ccell_id%2Clte_ca_scell_arfcn%2Clte_multi_ca_scell_info%2Cwan_active_band%2Cnr5g_pci%2Cnr5g_action_band%2Cnr5g_cell_id%2Clte_snr%2Cecio%2Cwan_active_channel%2Cnr5g_action_channel%2Cngbr_cell_info%2Cmonthly_tx_bytes%2Cmonthly_rx_bytes%2Clte_pci_lock%2Clte_earfcn_lock%2Cwan_ipaddr%2Cwan_apn%2Cpm_sensor_mdm%2Cpm_modem_5g%2Cmodem_main_state%2Cpin_status%2Copms_wan_mode%2Copms_wan_auto_mode%2Cloginfo%2Cnew_version_state%2Ccurrent_upgrade_state%2Cis_mandatory%2Cwifi_dfs_status%2Cbattery_value%2Cppp_dial_conn_fail_counter%2Cwifi_chip1_ssid1_auth_mode%2Cwifi_chip2_ssid1_auth_mode%2Cnetwork_provider%2Csimcard_roam%2Cspn_name_data%2Cspn_b1_flag%2Cspn_b2_flag%2Cwifi_onoff_state%2Cwifi_chip1_ssid1_ssid%2Cwifi_chip2_ssid1_ssid%2Cpppoe_status%2Cdhcp_wan_status%2Cstatic_wan_status%2Cmdm_mcc%2Cmdm_mnc%2CEX_SSID1%2Csta_ip_status%2CEX_wifi_profile%2Cm_ssid_enable%2CRadioOff%2Cwifi_chip1_ssid1_access_sta_num%2Cwifi_chip2_ssid1_access_sta_num%2Clan_ipaddr%2Cstation_mac%2Cwifi_access_sta_num%2Cbattery_charging%2Cbattery_vol_percent%2Cbattery_pers%2Crealtime_tx_bytes%2Crealtime_rx_bytes%2Crealtime_time%2Crealtime_tx_thrpt%2Crealtime_rx_thrpt%2Cmonthly_time%2Cdate_month%2Cdata_volume_limit_switch%2Cdata_volume_limit_size%2Cdata_volume_alert_percent%2Cdata_volume_limit_unit%2Croam_setting_option%2Cupg_roam_switch%2Cssid%2Cwifi_enable%2Cwifi_5g_enable%2Ccheck_web_conflict%2Cdial_mode%2Cprivacy_read_flag%2Cis_night_mode%2Cvpn_conn_status%2Cwan_connect_status%2Csms_received_flag%2Csts_received_flag%2Csms_unread_num%2Cwifi_chip1_ssid2_access_sta_num%2Cwifi_chip2_ssid2_access_sta_num%2Cstatic_wan_ipaddr%2Cdns_mode%2Cprefer_dns_manual%2Cstandby_dns_manual%2Csignalbar%2Cppp_status"
-            response = s.request('GET', cmd_url, headers=header)
-            data = response.data.decode('utf-8')
-            # Update cookies
-            set_cookie_header = response.headers.get('Set-Cookie', '')
-            self.update_cookies(set_cookie_header)
-            logger.info("Fetched ZTE info 3 successfully")
-            return data
-        except Exception as e:
-            logger.error(f"Failed to fetch ZTE info 3: {e}")
-            return ""
+            logger.debug("Fetching comprehensive ZTE info (zteinfo3)")
+            try:
+                # Step 1: Get LD and update cookies
+                LD = self.get_LD()
+                self.getCookie(username=self.username, password=self.password, LD=LD)
+        
+                # Step 2: Build headers
+                header = {
+                    "Host": self.ip,
+                    "Referer": f"{self.referer}index.html",
+                }
+                cookie_header = self.build_cookie_header()
+                if cookie_header:
+                    header['Cookie'] = cookie_header
+        
+                # Step 3: Combine all parameters into one comprehensive string
+                all_params = (
+                    "wa_inner_version,cr_version,network_type,rssi,rscp,rmcc,rmnc,enodeb_id,lte_rsrq,lte_rsrp,"
+                    "Z5g_snr,Z5g_rsrp,ZCELLINFO_band,Z5g_dlEarfcn,lte_ca_pcell_arfcn,lte_ca_pcell_band,"
+                    "lte_ca_scell_band,lte_ca_pcell_bandwidth,lte_ca_scell_info,lte_ca_scell_bandwidth,wan_lte_ca,"
+                    "lte_pci,Z5g_CELL_ID,Z5g_SINR,cell_id,lte_ca_scell_arfcn,lte_multi_ca_scell_info,"
+                    "wan_active_band,nr5g_pci,nr5g_action_band,nr5g_cell_id,lte_snr,ecio,wan_active_channel,"
+                    "nr5g_action_channel,ngbr_cell_info,monthly_tx_bytes,monthly_rx_bytes,lte_pci_lock,lte_earfcn_lock,"
+                    "wan_ipaddr,wan_apn,pm_sensor_mdm,pm_modem_5g,dns_mode,prefer_dns_manual,standby_dns_manual,"
+                    "lte_rssi,opms_wan_mode,opms_wan_auto_mode,ppp_status,loginfo,realtime_time,signalbar,"
+                    "static_wan_ipaddr,modem_main_state,pin_status,new_version_state,current_upgrade_state,is_mandatory,"
+                    "wifi_dfs_status,battery_value,ppp_dial_conn_fail_counter,wifi_chip1_ssid1_auth_mode,"
+                    "wifi_chip2_ssid1_auth_mode,network_provider,simcard_roam,spn_name_data,spn_b1_flag,spn_b2_flag,"
+                    "wifi_onoff_state,wifi_chip1_ssid1_ssid,wifi_chip2_ssid1_ssid,pppoe_status,dhcp_wan_status,"
+                    "static_wan_status,mdm_mcc,mdm_mnc,EX_SSID1,sta_ip_status,EX_wifi_profile,m_ssid_enable,RadioOff,"
+                    "wifi_chip1_ssid1_access_sta_num,wifi_chip2_ssid1_access_sta_num,lan_ipaddr,station_mac,"
+                    "wifi_access_sta_num,battery_charging,battery_vol_percent,battery_pers,realtime_tx_bytes,"
+                    "realtime_rx_bytes,realtime_tx_thrpt,realtime_rx_thrpt,monthly_time,date_month,"
+                    "data_volume_limit_switch,data_volume_limit_size,data_volume_alert_percent,data_volume_limit_unit,"
+                    "roam_setting_option,upg_roam_switch,ssid,wifi_enable,wifi_5g_enable,check_web_conflict,dial_mode,"
+                    "privacy_read_flag,is_night_mode,vpn_conn_status,wan_connect_status,sms_received_flag,"
+                    "sts_received_flag,sms_unread_num,wifi_chip1_ssid2_access_sta_num,wifi_chip2_ssid2_access_sta_num,"
+                    "network_provider_fullname,ip_passthrough_enabled,bandwidth,tx_power,rscp_1,ecio_1,rscp_2,ecio_2,"
+                    "rscp_3,ecio_3,rscp_4,ecio_4,lte_multi_ca_scell_sig_info,lte_band,lte_ca_pcell_freq,lte_rsrp_1,"
+                    "lte_rsrp_2,lte_rsrp_3,lte_rsrp_4,lte_snr_1,lte_snr_2,lte_snr_3,lte_snr_4,5g_rx0_rsrp,5g_rx1_rsrp,"
+                    "Z5g_rsrq,nr5g_action_nsa_band,nr_ca_pcell_band,nr_ca_pcell_freq,nr_multi_ca_scell_info,"
+                    "nr5g_sa_band_lock,nr5g_nsa_band_lock,pm_sensor_ambient,pm_sensor_5g,pm_sensor_pa1,wifi_chip_temp"
+                )
+        
+                # Step 4: Encode and build command URL
+                from urllib.parse import quote
+                cmd_encoded = quote(all_params)
+                cmd_url = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&cmd={cmd_encoded}&multi_data=1"
+        
+                # Step 5: Perform the request
+                response = s.request('GET', cmd_url, headers=header)
+                data = response.data.decode('utf-8')
+        
+                # Step 6: Update cookies and return data
+                set_cookie_header = response.headers.get('Set-Cookie', '')
+                self.update_cookies(set_cookie_header)
+                logger.info("Fetched comprehensive ZTE info successfully")
+                return data
+        
+            except Exception as e:
+                logger.error(f"Failed to fetch comprehensive ZTE info: {e}")
+                return ""
 
     def ztesmsinfo(self):
         logger.debug("Fetching ZTE SMS info")
