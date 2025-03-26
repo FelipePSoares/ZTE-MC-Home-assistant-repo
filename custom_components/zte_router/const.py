@@ -160,7 +160,25 @@ SENSOR_NAMES = {
     "lte_snr_1": "LTE SNR 1",
     "lte_snr_2": "LTE SNR 2",
     "lte_snr_3": "LTE SNR 3",
-    "lte_snr_4": "LTE SNR 4"
+    "lte_snr_4": "LTE SNR 4",
+    "apn_interface_version": "APN Interface Version",
+    "bandwidth": "Bandwidth",
+    "guest_switch": "Guest Switch",
+    "imei": "IMEI",
+    "ip_passthrough_enabled": "IP Passthrough Enabled",
+    "lte_band": "LTE Band",
+    "lte_ca_pcell_freq": "LTE CA PCell Frequency",
+    "lte_ca_scell_arfcn": "LTE CA SCell ARFCN",
+    "lte_earfcn_lock": "LTE EARFCN Lock",
+    "lte_pci_lock": "LTE PCI Lock",
+    "lte_rssi": "LTE RSSI",
+    "m_SSID2": "M SSID2",
+    "network_provider_fullname": "Network Provider Fullname",
+    "pm_sensor_5g": "PM Sensor 5G",
+    "tx_power": "TX Power",
+    "wifi_chip1_ssid1_wifi_coverage": "WiFi Chip1 SSID1 Coverage",
+    "wifi_chip1_ssid2_max_access_num": "WiFi Chip1 SSID2 Max Access Num",
+    "wifi_chip2_ssid2_max_access_num": "WiFi Chip2 SSID2 Max Access Num"
 }
 
 # Define which sensors should be included in the Diagnostics section
