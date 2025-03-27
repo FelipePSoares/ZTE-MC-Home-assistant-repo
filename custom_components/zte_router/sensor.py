@@ -13,7 +13,8 @@ from homeassistant.exceptions import PlatformNotReady
 from .const import (
     DOMAIN, SENSOR_NAMES, MANUFACTURER, MODEL, UNITS,
     DISABLED_SENSORS_MC889, DISABLED_SENSORS_MC888, DISABLED_SENSORS_MC801A,
-    DIAGNOSTICS_SENSORS
+    DIAGNOSTICS_SENSORS,FLUX_KEYS, FLUX_ICON_MAP
+
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -25,6 +26,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     ping_interval = entry.data.get("ping_interval", 60)
     sms_check_interval = entry.data.get("sms_check_interval", 100)
     router_type = entry.data.get("router_type", "MC801A")
+    config = {**entry.data, **entry.options}
+    enable_flux = config.get("enable_flux_sensors", True)
+
+
 
     _LOGGER.info(f"Router type selected: {router_type}")
     _LOGGER.info(f"Ping interval: {ping_interval} seconds")
@@ -48,11 +53,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         raise PlatformNotReady
 
     sensors = []
-    for key in coordinator.data.keys():
-        name = SENSOR_NAMES.get(key, key)  # Get the friendly name or default to key
-        sensors.append(ZTERouterSensor(coordinator, name, key, disabled_sensors.get(key, False)))
+    handled_keys = set()
 
-    # Add new dynamic set of sensors (command 3)
+    # Command 3 (dynamic data)
     dynamic_data = await hass.async_add_executor_job(
         coordinator.run_mc_script, ip_entry, password_entry, username_entry, 3
     )
@@ -63,13 +66,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     except json.JSONDecodeError as e:
         _LOGGER.error(f"Failed to parse JSON data for command 3: {e}")
         dynamic_data = {}
+    coordinator._data.update(dynamic_data)
 
-    coordinator._data.update(dynamic_data)  # Update coordinator's data with dynamic data
-    for key in dynamic_data.keys():
-        name = SENSOR_NAMES.get(key, key)
-        sensors.append(ZTERouterSensor(coordinator, name, key, disabled_sensors.get(key, False)))
-
-    # Add the new sensor for command 6 (SMS)
+    # Command 6 (SMS data)
     additional_data = await hass.async_add_executor_job(
         coordinator.run_mc_script, ip_entry, password_entry, username_entry, 6
     )
@@ -80,30 +79,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     except json.JSONDecodeError as e:
         _LOGGER.error(f"Failed to parse JSON data for command 6: {e}")
         additional_data = {}
+    coordinator._data.update(additional_data)
 
-    coordinator._data.update(additional_data)  # Update coordinator's data with additional data
-    for key in additional_data.keys():
-        name = SENSOR_NAMES.get(key, key)
-        sensors.append(ZTERouterSensor(coordinator, name, key, disabled_sensors.get(key, False)))
-
-    # Add the new sensor for Last SMS
+    # Add Last SMS sensor
     if "content" in additional_data:
-        sensors.append(LastSMSSensor(sms_coordinator, additional_data, disabled_sensors.get("last_sms", False)))  # Use the SMS coordinator
+        sensors.append(LastSMSSensor(sms_coordinator, additional_data, disabled_sensors.get("last_sms", False)))
 
-    # Add the Connected Bands sensor
+    # Core custom sensors
     sensors.append(ConnectedBandsSensor(coordinator, disabled_sensors.get("connected_bands", False)))
     sensors.append(WiFiClientsSensor(coordinator))
     sensors.append(LANClientsSensor(coordinator))
-
-
-    # Add the custom formatted sensors
     sensors.append(MonthlyUsageSensor(coordinator))
     sensors.append(monthly_tx_gb(coordinator))
     sensors.append(monthly_rx_gb(coordinator))
     sensors.append(DataLeftSensor(coordinator))
     sensors.append(ConnectionUptimeSensor(coordinator))
 
-    # ✅ ADDITIONAL: Fetch station list via command 16
+    # Command 16 (station list)
     station_list_data = await hass.async_add_executor_job(
         coordinator.run_mc_script, ip_entry, password_entry, username_entry, 16
     )
@@ -114,15 +106,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     except json.JSONDecodeError as e:
         _LOGGER.error(f"Failed to parse JSON data for command 16 (station_list): {e}")
         station_list_parsed = {}
-
     coordinator._data.update(station_list_parsed)
     sensors.append(ConnectedDevicesSensor(coordinator, disabled_by_default=False))
+
+    # --- FLUX sensors ---
+    if enable_flux:
+        for key in FLUX_KEYS:
+            if key not in handled_keys:
+                if key == "flux_total_usage":
+                    _LOGGER.debug(f"[FLUX] Registering FLUX Total Usage Sensor: {key}")
+                    sensors.append(ZTEFluxTotalUsageSensor(coordinator))
+                else:
+                    _LOGGER.debug(f"[FLUX] Registering FLUX sensor: {key}")
+                    sensors.append(ZTEFluxSensor(coordinator, key))
+                handled_keys.add(key)
+    else:
+        _LOGGER.info("FLUX sensors are disabled by user config. Skipping creation.")
+
+
+    # --- Selected other formatted sensors ---
+    formatted_keys = {"connection_uptime"}
+    if not enable_flux:
+        formatted_keys.add("date_month")
+
+    # --- Fallback: all others as basic sensors ---
+    _LOGGER.debug(f"Remaining unhandled keys: {[k for k in coordinator.data.keys() if k not in handled_keys]}")
+    for key in coordinator.data.keys():
+        if key in handled_keys or key in FLUX_KEYS:
+            continue
+        name = SENSOR_NAMES.get(key, key)
+        sensors.append(ZTERouterSensor(coordinator, name, key, disabled_sensors.get(key, False)))
+        handled_keys.add(key)
+
 
     _LOGGER.info(f"Sensors added: {[sensor.name for sensor in sensors]}")
     _LOGGER.info(f"Diagnostics sensors: {[sensor.name for sensor in sensors if sensor.is_diagnostics]}")
 
     async_add_entities(sensors, True)
-
 
 def extract_json(output):
     """Extract the JSON data from the output."""
@@ -1158,3 +1178,172 @@ def format_seconds(seconds):
         return " ".join(parts)
     except (TypeError, ValueError):
         return "--"
+
+BYTE_KEYS = {
+    "flux_realtime_tx_bytes",
+    "flux_realtime_rx_bytes",
+    "flux_monthly_tx_bytes",
+    "flux_monthly_rx_bytes",
+}
+
+THROUGHPUT_KEYS = {
+    "flux_realtime_tx_thrpt",
+    "flux_realtime_rx_thrpt",
+}
+
+class ZTEDataStatisticsSensor(ZTERouterEntity):
+    def __init__(self, coordinator, key):
+        self.coordinator = coordinator
+        self._key = key
+        self._name = SENSOR_NAMES.get(key, key)
+        self._unit = UNITS.get(key)
+        self._state = None
+        self.entity_registry_enabled_default = True
+        self._attr_should_poll = False
+        self._attr_is_diagnostics = key in FLUX_KEYS
+        _LOGGER.debug(f"[FLUX] Initialized ZTEDataStatisticsSensor: {self._name} | Diagnostic: {self._attr_is_diagnostics}")
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def state(self):
+        raw = self.coordinator.data.get(self._key)
+        _LOGGER.debug(f"[FLUX] {self._name}: Raw value = {repr(raw)}")
+
+        if raw in [None, "", "null"]:
+            _LOGGER.warning(f"[FLUX] {self._name}: Missing or empty value")
+            return "N/A"
+
+        try:
+            clean_raw = str(raw).strip()
+            value = int(float(clean_raw))
+            _LOGGER.debug(f"[FLUX] {self._name}: Parsed value = {value}")
+
+            if self._key in BYTE_KEYS:
+                gb_value = value / 1024 / 1024 / 1024
+                self._unit = "GB"
+                if gb_value >= 1024:
+                    self._unit = "TB"
+                    result = round(gb_value / 1024, 2)
+                else:
+                    result = round(gb_value, 2)
+                _LOGGER.info(f"[FLUX] {self._name}: {value} bytes => {result} {self._unit}")
+                return result
+
+            elif self._key.endswith("_time"):
+                formatted = self.format_seconds(value)
+                _LOGGER.info(f"[FLUX] {self._name}: {value} seconds => {formatted}")
+                return formatted
+
+            elif self._key in THROUGHPUT_KEYS:
+                formatted = self.format_throughput(value)
+                _LOGGER.info(f"[FLUX] {self._name}: {value} bps => {formatted}")
+                return formatted
+
+            elif self._key == "date_month":
+                result = f"{clean_raw[:4]}-{clean_raw[4:6]}" if len(clean_raw) == 8 else clean_raw
+                _LOGGER.info(f"[FLUX] {self._name}: Parsed date => {result}")
+                return result
+
+            _LOGGER.info(f"[FLUX] {self._name}: Raw int value returned = {value}")
+            return value
+
+        except (ValueError, TypeError) as e:
+            _LOGGER.warning(f"[FLUX] {self._name}: Failed to convert value '{raw}' - {e}")
+            return "N/A"
+
+    @property
+    def unit_of_measurement(self):
+        if self._key in BYTE_KEYS:
+            return self._unit
+        elif self._key in THROUGHPUT_KEYS:
+            return None
+        return self._unit
+
+    @property
+    def unique_id(self):
+        return f"{DOMAIN}_{self.coordinator.ip_entry}_stat_{self._key}"
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, f"{DOMAIN}_{self.coordinator.ip_entry}")},
+            "name": self.coordinator.ip_entry,
+            "manufacturer": "ZTE",
+            "model": "MC Series",
+        }
+
+    @property
+    def is_diagnostics(self):
+        return self._attr_is_diagnostics
+
+    @property
+    def entity_category(self):
+        return EntityCategory.DIAGNOSTIC if self.is_diagnostics else None
+
+    async def async_update(self):
+        _LOGGER.debug(f"[FLUX] Manual update requested for {self._name}")
+        await self.coordinator.async_request_refresh()
+
+    async def async_handle_coordinator_update(self):
+        _LOGGER.debug(f"[FLUX] Coordinator update triggered for {self._name}")
+        self.async_write_ha_state()
+
+    def format_seconds(self, seconds):
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        sec = seconds % 60
+        return f"{hours}h {minutes}m {sec}s"
+
+    def format_throughput(self, bps):
+        if bps >= 1_000_000:
+            return f"{bps / 1_000_000:.2f} Mbps"
+        elif bps >= 1_000:
+            return f"{bps / 1_000:.2f} Kbps"
+        return f"{bps} bps"
+
+class ZTEFluxSensor(ZTEDataStatisticsSensor):
+    def __init__(self, coordinator, key):
+        super().__init__(coordinator, key)
+        self._attr_is_diagnostics = True
+        self._attr_should_poll = False
+        _LOGGER.debug(f"[FLUX] Initialized ZTEFluxSensor: {self._name}")
+
+    @property
+    def icon(self):
+        return FLUX_ICON_MAP.get(self._key, "mdi:chart-bar")
+
+    @property
+    def entity_category(self):
+        return EntityCategory.DIAGNOSTIC
+
+class ZTEFluxTotalUsageSensor(ZTEFluxSensor):
+    def __init__(self, coordinator):
+        super().__init__(coordinator, "flux_total_usage")
+        self._name = "FLUX Monthly Usage"
+        self._unit = "GB"
+        _LOGGER.debug(f"[FLUX] Initialized ZTEFluxTotalUsageSensor")
+
+    @property
+    def state(self):
+        try:
+            tx_raw = self.coordinator.data.get("flux_monthly_tx_bytes", "0")
+            rx_raw = self.coordinator.data.get("flux_monthly_rx_bytes", "0")
+            _LOGGER.debug(f"[FLUX] Total TX raw: {tx_raw} | RX raw: {rx_raw}")
+
+            tx = int(float(tx_raw.strip())) if tx_raw else 0
+            rx = int(float(rx_raw.strip())) if rx_raw else 0
+
+            total_gb = (tx + rx) / 1024 / 1024 / 1024
+            result = round(total_gb, 2)
+            _LOGGER.info(f"[FLUX] Total Monthly Usage: TX={tx}, RX={rx}, Total={result} GB")
+            return result
+        except Exception as e:
+            _LOGGER.warning(f"[FLUX] Total Usage: Failed to calculate - {e}")
+            return "N/A"
+
+    @property
+    def unique_id(self):
+        return f"{DOMAIN}_{self.coordinator.ip_entry}_stat_flux_total_usage"

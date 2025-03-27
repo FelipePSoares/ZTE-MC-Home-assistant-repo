@@ -54,7 +54,8 @@ class ZTERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional("message_2", default=""): str,       # New Message 2
             vol.Optional("create_automation_sms", default=True): bool,
             vol.Optional("create_automation_clean", default=False): bool,
-            vol.Optional("create_automation_reboot", default=False): bool
+            vol.Optional("create_automation_reboot", default=False): bool,
+            vol.Optional("enable_flux_sensors", default=False): bool,
         }
 
         # Conditionally add the router_username field if applicable
@@ -144,6 +145,10 @@ class ZTERouterOptionsFlowHandler(config_entries.OptionsFlow):
                 "create_automation_reboot",
                 self.config_entry.data.get("create_automation_reboot", False)
             ),
+            "enable_flux_sensors": self.config_entry.options.get(
+                "enable_flux_sensors",
+                self.config_entry.data.get("enable_flux_sensors", True)
+            ),
         }
 
         # Base options schema without router_type
@@ -162,6 +167,7 @@ class ZTERouterOptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional("create_automation_sms", default=current_data["create_automation_sms"]): bool,
             vol.Optional("create_automation_clean", default=current_data["create_automation_clean"]): bool,
             vol.Optional("create_automation_reboot", default=current_data["create_automation_reboot"]): bool,
+            vol.Optional("enable_flux_sensors", default=current_data["enable_flux_sensors"]): bool,
         }
 
         # Conditionally add the router_username field if applicable

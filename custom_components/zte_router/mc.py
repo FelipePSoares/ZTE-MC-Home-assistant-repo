@@ -521,7 +521,11 @@ class zteRouter:
                         "data_volume_limit_size,data_volume_alert_percent,data_volume_limit_unit,roam_setting_option,"
                         "upg_roam_switch,privacy_read_flag,is_night_mode,check_web_conflict,station_mac,lan_ipaddr,"
                         "sms_received_flag,sms_unread_num,sts_received_flag,spn_name_data,spn_b1_flag,spn_b2_flag,"
-                        "simcard_roam"
+                        "simcard_roam,"
+                        "flux_realtime_tx_bytes,flux_realtime_rx_bytes,flux_realtime_time,"
+                        "flux_realtime_tx_thrpt,flux_realtime_rx_thrpt,"
+                        "flux_monthly_rx_bytes,flux_monthly_tx_bytes,flux_monthly_time,"
+                        "flux_data_volume_limit_size,flux_data_volume_alert_percent,flux_data_volume_limit_unit"
                     ),
                     "dns_config": (
                         "dns_mode,prefer_dns_manual,standby_dns_manual"

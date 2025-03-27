@@ -178,7 +178,19 @@ SENSOR_NAMES = {
     "tx_power": "TX Power",
     "wifi_chip1_ssid1_wifi_coverage": "WiFi Chip1 SSID1 Coverage",
     "wifi_chip1_ssid2_max_access_num": "WiFi Chip1 SSID2 Max Access Num",
-    "wifi_chip2_ssid2_max_access_num": "WiFi Chip2 SSID2 Max Access Num"
+    "wifi_chip2_ssid2_max_access_num": "WiFi Chip2 SSID2 Max Access Num",
+    "flux_realtime_tx_bytes": "FLUX Realtime TX",
+    "flux_realtime_rx_bytes": "FLUX Realtime RX",
+    "flux_realtime_time": "FLUX Realtime Time",
+    "flux_realtime_tx_thrpt": "FLUX Realtime TX Speed",
+    "flux_realtime_rx_thrpt": "FLUX Realtime RX Speed",
+    "flux_monthly_tx_bytes": "FLUX Monthly TX",
+    "flux_monthly_rx_bytes": "FLUX Monthly RX",
+    "flux_monthly_time": "FLUX Monthly Time",
+    "flux_data_volume_limit_size": "FLUX Data Plan Limit",
+    "flux_data_volume_alert_percent": "FLUX Alert Threshold",
+    "flux_data_volume_limit_unit": "FLUX Limit Unit",
+    "date_month": "FLUX Current Billing Month",
 }
 
 # Define which sensors should be included in the Diagnostics section
@@ -449,4 +461,54 @@ DISABLED_SENSORS_MC801A = {
     "sms_nv_received_total":True,
     "sms_received_flag":True,
     "tag": True,
+}
+
+FLUX_KEYS = {
+    "flux_realtime_tx_bytes",
+    "flux_realtime_rx_bytes",
+    "flux_realtime_time",
+    "flux_realtime_tx_thrpt",
+    "flux_realtime_rx_thrpt",
+    "flux_monthly_tx_bytes",
+    "flux_monthly_rx_bytes",
+    "flux_monthly_time",
+    "flux_data_volume_limit_size",
+    "flux_data_volume_alert_percent",
+    "flux_data_volume_limit_unit",
+    "date_month",
+    "flux_total_usage",
+    "flux_monthly_usage",
+}
+
+SENSOR_NAMES.update({
+    "flux_realtime_tx_bytes": "FLUX Realtime TX",
+    "flux_realtime_rx_bytes": "FLUX Realtime RX",
+    "flux_realtime_time": "FLUX Realtime Time",
+    "flux_realtime_tx_thrpt": "FLUX Realtime TX Speed",
+    "flux_realtime_rx_thrpt": "FLUX Realtime RX Speed",
+    "flux_monthly_tx_bytes": "FLUX Monthly TX",
+    "flux_monthly_rx_bytes": "FLUX Monthly RX",
+    "flux_monthly_time": "FLUX Monthly Time",
+    "flux_data_volume_limit_size": "FLUX Data Plan Limit",
+    "flux_data_volume_alert_percent": "FLUX Alert Threshold",
+    "flux_data_volume_limit_unit": "FLUX Limit Unit",
+    "date_month": "FLUX Current Billing Month",
+    "flux_total_usage": "FLUX Monthly Usage",
+})
+
+# Mapping of icons for each flux key
+FLUX_ICON_MAP = {
+    "flux_realtime_tx_bytes": "mdi:upload",
+    "flux_realtime_rx_bytes": "mdi:download",
+    "flux_realtime_time": "mdi:clock-time-four-outline",
+    "flux_realtime_tx_thrpt": "mdi:upload-network",
+    "flux_realtime_rx_thrpt": "mdi:download-network",
+    "flux_monthly_tx_bytes": "mdi:upload",
+    "flux_monthly_rx_bytes": "mdi:download",
+    "flux_monthly_time": "mdi:clock-time-four-outline",
+    "flux_data_volume_limit_size": "mdi:database",
+    "flux_data_volume_alert_percent": "mdi:alert",
+    "flux_data_volume_limit_unit": "mdi:weight",
+    "date_month": "mdi:calendar",
+    "flux_total_usage": "mdi:chart-bar",
 }

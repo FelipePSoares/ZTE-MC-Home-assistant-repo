@@ -26,7 +26,8 @@
                     "message_2": "Message 2",
                     "create_automation_sms": "Create SMS Automation",
                     "create_automation_clean": "Create Clean SMS Memory Automation",
-                    "create_automation_reboot": "Create Reboot Automation"
+                    "create_automation_reboot": "Create Reboot Automation",
+                    "enable_flux_sensors": "Enable FLUX sensors"
                 }
             }
         },
@@ -53,7 +54,8 @@
                     "message_2": "Message 2",
                     "create_automation_sms": "Create SMS Automation",
                     "create_automation_clean": "Create Clean SMS Memory Automation",
-                    "create_automation_reboot": "Create Reboot Automation"
+                    "create_automation_reboot": "Create Reboot Automation",
+                    "enable_flux_sensors": "Enable FLUX sensors"
                 }
             }
         }

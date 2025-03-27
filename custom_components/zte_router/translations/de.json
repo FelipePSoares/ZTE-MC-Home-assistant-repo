@@ -26,7 +26,8 @@
                     "message_2": "Nachricht 2",
                     "create_automation_sms": "SMS-Automatisierung erstellen",
                     "create_automation_clean": "Automatisches Löschen des SMS-Speichers erstellen",
-                    "create_automation_reboot": "Neustart-Automatisierung erstellen"
+                    "create_automation_reboot": "Neustart-Automatisierung erstellen",
+                    "enable_flux_sensors": "FLUX sensors"
                 }
             }
         },
@@ -53,7 +54,8 @@
                     "message_2": "Nachricht 2",
                     "create_automation_sms": "SMS-Automatisierung erstellen",
                     "create_automation_clean": "Automatisches Löschen des SMS-Speichers erstellen",
-                    "create_automation_reboot": "Neustart-Automatisierung erstellen"
+                    "create_automation_reboot": "Neustart-Automatisierung erstellen",
+                    "enable_flux_sensors": "FLUX sensors"
                 }
             }
         }
