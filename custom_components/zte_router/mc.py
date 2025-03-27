@@ -569,6 +569,63 @@ class zteRouter:
             logger.error(f"Failed to fetch comprehensive ZTE info: {e}")
             return ""
 
+    def zteinfo4(self):
+        """
+        Fetch ZTE modem info for both 'station_list' (WiFi) and 'lan_station_list' (LAN),
+        tag each with type, and return a merged list under 'all_devices'.
+
+        Returns:
+            str: JSON string of the combined result, or empty string on error.
+        """
+        logger.debug("Fetching ZTE info: station_list and lan_station_list (tagged & merged)")
+        try:
+            LD = self.get_LD()
+            self.getCookie(username=self.username, password=self.password, LD=LD)
+
+            header = {
+                "Host": self.ip,
+                "Referer": f"{self.referer}index.html",
+            }
+
+            cookie_header = self.build_cookie_header()
+            if cookie_header:
+                header['Cookie'] = cookie_header
+
+            combined_data = {}
+
+            for param in ["station_list", "lan_station_list"]:
+                cmd_str = quote(param)
+                url = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&cmd={cmd_str}"
+                response = s.request('GET', url, headers=header)
+                raw_data = response.data.decode('utf-8')
+
+                set_cookie_header = response.headers.get('Set-Cookie', '')
+                self.update_cookies(set_cookie_header)
+
+                try:
+                    parsed = json.loads(raw_data)
+
+                    # Tag each device with type: WiFi or LAN
+                    for item in parsed.get(param, []):
+                        item["type"] = "WiFi" if param == "station_list" else "LAN"
+
+                    combined_data[param] = parsed.get(param, [])
+                    logger.debug(f"Fetched {param} with {len(parsed.get(param, []))} entries")
+                except Exception as ex:
+                    logger.warning(f"Failed to parse {param}: {ex}")
+                    combined_data[param] = []
+
+            # ✅ Merge all into one list
+            combined_data["all_devices"] = combined_data["station_list"] + combined_data["lan_station_list"]
+            logger.info(f"Fetched and merged {len(combined_data['all_devices'])} total devices")
+
+            return json.dumps(combined_data)
+
+        except Exception as e:
+            logger.error(f"Failed to fetch ZTE info: {e}")
+            return ""
+
+
     def ztesmsinfo(self):
         logger.debug("Fetching ZTE SMS info")
         try:
@@ -929,6 +986,9 @@ if __name__ == "__main__":
             print(result)
         elif command == 15:
             result = zte.setdata_mode("WL_AND_5G")
+        elif command == 16:
+            result = zte.zteinfo4()
+            print(result)
         else:
             print(f"Invalid command: {command}")
             sys.exit(1)

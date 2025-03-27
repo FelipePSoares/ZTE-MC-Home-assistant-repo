@@ -52,7 +52,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         name = SENSOR_NAMES.get(key, key)  # Get the friendly name or default to key
         sensors.append(ZTERouterSensor(coordinator, name, key, disabled_sensors.get(key, False)))
 
-    # Add new dynamic set of sensors
+    # Add new dynamic set of sensors (command 3)
     dynamic_data = await hass.async_add_executor_job(
         coordinator.run_mc_script, ip_entry, password_entry, username_entry, 3
     )
@@ -69,7 +69,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         name = SENSOR_NAMES.get(key, key)
         sensors.append(ZTERouterSensor(coordinator, name, key, disabled_sensors.get(key, False)))
 
-    # Add the new sensor for command 6
+    # Add the new sensor for command 6 (SMS)
     additional_data = await hass.async_add_executor_job(
         coordinator.run_mc_script, ip_entry, password_entry, username_entry, 6
     )
@@ -92,6 +92,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     # Add the Connected Bands sensor
     sensors.append(ConnectedBandsSensor(coordinator, disabled_sensors.get("connected_bands", False)))
+    sensors.append(WiFiClientsSensor(coordinator))
+    sensors.append(LANClientsSensor(coordinator))
+
 
     # Add the custom formatted sensors
     sensors.append(MonthlyUsageSensor(coordinator))
@@ -100,10 +103,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     sensors.append(DataLeftSensor(coordinator))
     sensors.append(ConnectionUptimeSensor(coordinator))
 
+    # ✅ ADDITIONAL: Fetch station list via command 16
+    station_list_data = await hass.async_add_executor_job(
+        coordinator.run_mc_script, ip_entry, password_entry, username_entry, 16
+    )
+    _LOGGER.debug(f"Station list raw output: {station_list_data}")
+    try:
+        station_list_json = extract_json(station_list_data)
+        station_list_parsed = json.loads(station_list_json)
+    except json.JSONDecodeError as e:
+        _LOGGER.error(f"Failed to parse JSON data for command 16 (station_list): {e}")
+        station_list_parsed = {}
+
+    coordinator._data.update(station_list_parsed)
+    sensors.append(ConnectedDevicesSensor(coordinator, disabled_by_default=False))
+
     _LOGGER.info(f"Sensors added: {[sensor.name for sensor in sensors]}")
     _LOGGER.info(f"Diagnostics sensors: {[sensor.name for sensor in sensors if sensor.is_diagnostics]}")
 
     async_add_entities(sensors, True)
+
 
 def extract_json(output):
     """Extract the JSON data from the output."""
@@ -134,19 +153,33 @@ class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         _LOGGER.info("Starting _async_update_data in DataUpdateCoordinator at %s", datetime.now())
         try:
-            # Add an 8-second delay before executing the script
-            await asyncio.sleep(4)
-            # Offload the blocking function to a thread
-            data = await self.hass.async_add_executor_job(
+            await asyncio.sleep(4)  # Optional initial delay
+
+            # Fetch main data (command 7)
+            main_data = await self.hass.async_add_executor_job(
                 self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, 7
             )
-            _LOGGER.debug(f"Data received from mc.py script: {data}")
-            json_data = extract_json(data)
-            self._data.update(json.loads(json_data))
+            _LOGGER.debug(f"Data received from command 7: {main_data}")
+            main_json = extract_json(main_data)
+            self._data.update(json.loads(main_json))
+
+            # Wait 3 seconds before next command
+            await asyncio.sleep(3)
+
+            # Fetch station and LAN clients (command 16)
+            clients_data = await self.hass.async_add_executor_job(
+                self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, 16
+            )
+            _LOGGER.debug(f"Data received from command 16: {clients_data}")
+            clients_json = extract_json(clients_data)
+            self._data.update(json.loads(clients_json))
+
             return self._data
+
         except Exception as err:
             _LOGGER.error(f"Error during _async_update_data: {err}")
             return self._data
+
 
     def run_mc_script(self, ip, password, username, command, retries=3, delay=2):
         attempt = 0
@@ -299,58 +332,65 @@ class ZTERouterSensor(ZTERouterEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_handle_coordinator_update(self):
-            old_state = self._state
-            state_changed = False  # Track if an update is needed
+        old_state = self._state
+        state_changed = False
 
-            if self.coordinator.data:
-                new_state = self.coordinator.data.get(self._key, None)
+        if self.coordinator.data:
+            new_state = self.coordinator.data.get(self._key, None)
 
-                if new_state is not None and isinstance(new_state, str) and new_state.strip():
-                    processed_state = new_state
+            if isinstance(new_state, str):
+                raw_state = new_state  # Preserve the raw incoming string
+                display_state = new_state if new_state.strip() else "n/a"
 
-                    if "pci" in self._key.lower():
-                        try:
-                            processed_state = int(new_state, 16)
-                            _LOGGER.debug(
-                                f"Converted hex PCI value to decimal for key '{self._key}': {processed_state}"
-                            )
-                        except (ValueError, TypeError):
-                            _LOGGER.warning(
-                                f"Failed to convert value for key '{self._key}' (expected hex string): {new_state}"
-                            )
-                            processed_state = new_state  # fallback to original if conversion fails
-
-                    elif "ngbr_cell_info" in self._key.lower():
-                        max_length = 255
-                        if len(new_state) > max_length:
-                            processed_state = new_state[:max_length]
-                            _LOGGER.debug(
-                                f"Truncated 'ngbr_cell_info' to {max_length} characters for key '{self._key}'."
-                            )
-
-                    # Check if state actually changed
-                    if processed_state != old_state:
-                        self._state = processed_state
-                        state_changed = True
-                        _LOGGER.info(
-                            f"Sensor '{self._name}' updated. Old state: {old_state}, New state: {self._state}"
-                        )
-                    else:
+                # Try to convert PCI from hex if applicable and not empty
+                if "pci" in self._key.lower() and new_state.strip():
+                    try:
+                        raw_state = int(new_state, 16)
+                        display_state = raw_state
                         _LOGGER.debug(
-                            f"Sensor '{self._name}' state unchanged."
+                            f"Converted hex PCI value to decimal for key '{self._key}': {raw_state}"
                         )
+                    except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            f"Failed to convert value for key '{self._key}' (expected hex string): {new_state}"
+                        )
+                        raw_state = new_state
+                        display_state = new_state if new_state.strip() else "n/a"
+
+                elif "ngbr_cell_info" in self._key.lower():
+                    max_length = 255
+                    if len(new_state) > max_length:
+                        raw_state = new_state[:max_length]
+                        display_state = raw_state
+                        _LOGGER.debug(
+                            f"Truncated 'ngbr_cell_info' to {max_length} characters for key '{self._key}'."
+                        )
+
+                # Compare raw values to detect change
+                if raw_state != old_state:
+                    self._state = raw_state
+                    state_changed = True
+                    _LOGGER.info(
+                        f"Sensor '{self._name}' updated. Old state: {old_state}, New state: {self._state} (Displayed as: {display_state})"
+                    )
                 else:
                     _LOGGER.debug(
-                        f"No valid (non-empty) value found for key '{self._key}' in coordinator data."
+                        f"Sensor '{self._name}' state unchanged."
                     )
-            else:
-                _LOGGER.warning(
-                    f"No coordinator data available for sensor '{self._name}'. Retaining last state."
-                )
 
-            # Only write HA state if it has changed
-            if state_changed:
-                self.async_write_ha_state()
+            else:
+                _LOGGER.debug(
+                    f"Invalid value type for key '{self._key}' in coordinator data: {type(new_state)}"
+                )
+        else:
+            _LOGGER.warning(
+                f"No coordinator data available for sensor '{self._name}'. Retaining last state."
+            )
+
+        if state_changed:
+            # Optionally expose display value to HA
+            self.async_write_ha_state()
+
 
 class LastSMSSensor(ZTERouterEntity):
     def __init__(self, coordinator, sms_data, disabled_by_default=False):
@@ -906,3 +946,215 @@ class ConnectionUptimeSensor(ZTERouterEntity):
         else:
             _LOGGER.warning(f"No data available for Connection Uptime sensor. Retaining last state: {self._state}")
         self.async_write_ha_state()
+
+class ConnectedDevicesSensor(ZTERouterEntity):
+    def __init__(self, coordinator, disabled_by_default=False):
+        self.coordinator = coordinator
+        self._name = "Connected Devices"
+        self._state = None
+        self._attributes = {}
+        self.entity_registry_enabled_default = not disabled_by_default
+        self._attr_should_poll = False
+        _LOGGER.info("Initializing Connected Devices sensor")
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def state(self):
+        return len(self._attributes.get("station_list", []))
+
+    @property
+    def unique_id(self):
+        return f"{DOMAIN}_{self.coordinator.ip_entry}_connected_devices"
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, f"{DOMAIN}_{self.coordinator.ip_entry}")},
+            "name": self.coordinator.ip_entry,
+            "manufacturer": MANUFACTURER,
+            "model": MODEL,
+            "sw_version": self.coordinator.data.get("wa_inner_version", "Unknown")
+        }
+
+    @property
+    def available(self):
+        return True
+
+    @property
+    def extra_state_attributes(self):
+        return self._attributes
+
+    @property
+    def is_diagnostics(self):
+        return False  # ✅ This fixes the crash
+
+    async def async_update(self):
+        _LOGGER.info(f"Manual update requested for Connected Devices sensor at {datetime.now()}")
+        await self.coordinator.async_request_refresh()
+
+    async def async_handle_coordinator_update(self):
+        if self.coordinator.data:
+            station_list = self.coordinator.data.get("station_list", [])
+            self._attributes["station_list"] = station_list
+            _LOGGER.info(f"Connected Devices updated: {len(station_list)} devices")
+        else:
+            _LOGGER.warning("No data available for Connected Devices")
+        self.async_write_ha_state()
+
+class WiFiClientsSensor(ZTERouterEntity):
+    def __init__(self, coordinator, disabled_by_default=False):
+        self.coordinator = coordinator
+        self._name = "WiFi Clients"
+        self._state = None
+        self._attributes = {}
+        self.entity_registry_enabled_default = not disabled_by_default
+        self._attr_should_poll = False
+        _LOGGER.info("Initializing WiFi Clients sensor")
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def state(self):
+        return len(self._attributes.get("wifi_clients", []))
+
+    @property
+    def unique_id(self):
+        return f"{DOMAIN}_{self.coordinator.ip_entry}_wifi_clients"
+
+    @property
+    def extra_state_attributes(self):
+        return self._attributes
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, f"{DOMAIN}_{self.coordinator.ip_entry}")},
+            "name": self.coordinator.ip_entry,
+            "manufacturer": MANUFACTURER,
+            "model": MODEL,
+            "sw_version": self.coordinator.data.get("wa_inner_version", "Unknown")
+        }
+
+    @property
+    def is_diagnostics(self):
+        return False
+
+    async def async_update(self):
+        await self.coordinator.async_request_refresh()
+
+    async def async_handle_coordinator_update(self):
+        if self.coordinator.data:
+            wifi_clients = self.coordinator.data.get("station_list", [])
+            self._state = len(wifi_clients)
+
+            formatted_clients = []
+            for client in wifi_clients:
+                    formatted_clients.append({
+                        "Hostname": client.get("hostname", "--"),
+                        "MAC Address": client.get("mac_addr", "--"),
+                        "IP Address": client.get("ip_addr", "--"),
+                        "Speed": f"{client.get('agreed_rate', '--')} Mbps",
+                        "Connected": format_seconds(client.get("connect_time", 0)),
+                        "Address Type": client.get("addr_type", "--"),
+                        "Type": client.get("type", "--"),
+                    })
+
+
+
+            self._attributes["wifi_clients"] = formatted_clients
+            _LOGGER.info(f"WiFi Clients sensor updated: {self._state} devices")
+        else:
+            _LOGGER.warning("No data for WiFi Clients")
+        self.async_write_ha_state()
+
+
+
+class LANClientsSensor(ZTERouterEntity):
+    def __init__(self, coordinator, disabled_by_default=False):
+        self.coordinator = coordinator
+        self._name = "LAN Clients"
+        self._state = None
+        self._attributes = {}
+        self.entity_registry_enabled_default = not disabled_by_default
+        self._attr_should_poll = False
+        _LOGGER.info("Initializing LAN Clients sensor")
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def state(self):
+        return len(self._attributes.get("lan_clients", []))
+
+    @property
+    def unique_id(self):
+        return f"{DOMAIN}_{self.coordinator.ip_entry}_lan_clients"
+
+    @property
+    def extra_state_attributes(self):
+        return self._attributes
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, f"{DOMAIN}_{self.coordinator.ip_entry}")},
+            "name": self.coordinator.ip_entry,
+            "manufacturer": MANUFACTURER,
+            "model": MODEL,
+            "sw_version": self.coordinator.data.get("wa_inner_version", "Unknown")
+        }
+
+    @property
+    def is_diagnostics(self):
+        return False
+
+    async def async_update(self):
+        await self.coordinator.async_request_refresh()
+
+    async def async_handle_coordinator_update(self):
+        if self.coordinator.data:
+            lan_clients = self.coordinator.data.get("lan_station_list", [])
+            self._state = len(lan_clients)
+
+            formatted_clients = []
+            for client in lan_clients:
+                formatted_clients.append({
+                    "Hostname": client.get("hostname", "--"),
+                    "MAC Address": client.get("mac_addr", "--"),
+                    "IP Address": client.get("ip_addr", "--"),
+                    "Speed": f"{client.get('agreed_rate', '--')} Mbps",
+                    "Connected": format_seconds(client.get("connect_time", 0)),
+                    "Address Type": client.get("addr_type", "--"),
+                    "Type": client.get("type", "--"),
+                })
+
+
+            self._attributes["lan_clients"] = formatted_clients
+            _LOGGER.info(f"LAN Clients sensor updated: {self._state} devices")
+        else:
+            _LOGGER.warning("No data for LAN Clients")
+        self.async_write_ha_state()
+
+def format_seconds(seconds):
+    try:
+        seconds = int(seconds)
+        hours, remainder = divmod(seconds, 3600)
+        minutes, sec = divmod(remainder, 60)
+
+        parts = []
+        if hours:
+            parts.append(f"{hours}h")
+        if minutes:
+            parts.append(f"{minutes}m")
+        if sec or not parts:
+            parts.append(f"{sec}s")
+
+        return " ".join(parts)
+    except (TypeError, ValueError):
+        return "--"
