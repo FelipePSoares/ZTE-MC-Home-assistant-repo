@@ -481,49 +481,56 @@ class zteRouter:
             if cookie_header:
                 header['Cookie'] = cookie_header
 
-            param_groups = {
-                "system_info": (
-                    "wa_inner_version,cr_version,loginfo,new_version_state,current_upgrade_state,"
-                    "is_mandatory,modem_main_state,ld,pin_status,signalbar"
-                ),
-                "radio_network": (
-                    "network_type,network_provider,network_provider_fullname,rmcc,rmnc,mdm_mcc,mdm_mnc,"
-                    "rssi,ecio,ecio_1,ecio_2,ecio_3,ecio_4,rscp,rscp_1,rscp_2,rscp_3,rscp_4,lte_rsrp,"
-                    "lte_rsrp_1,lte_rsrp_2,lte_rsrp_3,lte_rsrp_4,lte_rsrq,lte_snr,lte_snr_1,lte_snr_2,lte_snr_3,lte_snr_4,"
-                    "lte_rssi,Z5g_rsrp,Z5g_rsrq,Z5g_snr,Z5g_SINR,Z5g_dlEarfcn,Z5g_CELL_ID,ZCELLINFO_band,"
-                    "enodeb_id,lte_pci,lte_pci_lock,lte_band,lte_ca_pcell_band,lte_ca_scell_band,lte_ca_scell_info,"
-                    "lte_multi_ca_scell_info,lte_multi_ca_scell_sig_info,lte_ca_scell_arfcn,lte_ca_scell_bandwidth,"
-                    "lte_ca_pcell_bandwidth,lte_ca_pcell_arfcn,lte_ca_pcell_freq,lte_earfcn_lock,nr5g_action_band,"
-                    "nr5g_action_channel,nr5g_action_nsa_band,nr5g_pci,nr5g_cell_id,nr_ca_pcell_band,nr_ca_pcell_freq,"
-                    "nr5g_nsa_band_lock,nr5g_sa_band_lock,nr_multi_ca_scell_info,wan_active_band,wan_active_channel,"
-                    "cell_id,tx_power,ngbr_cell_info"
-                ),
-                "connectivity": (
-                    "wan_ipaddr,wan_apn,wan_connect_status,wan_lte_ca,opms_wan_mode,opms_wan_auto_mode,"
-                    "ppp_status,pppoe_status,dial_mode,dhcp_wan_status,static_wan_status,static_wan_ipaddr,"
-                    "ip_passthrough_enabled,vpn_conn_status"
-                ),
-                "wifi": (
-                    "wifi_enable,wifi_onoff_state,wifi_5g_enable,wifi_chip_temp,wifi_dfs_status,"
-                    "ssid,EX_SSID1,EX_wifi_profile,m_ssid_enable,wifi_chip1_ssid1_ssid,wifi_chip2_ssid1_ssid,"
-                    "wifi_chip1_ssid1_auth_mode,wifi_chip2_ssid1_auth_mode,wifi_chip1_ssid2_access_sta_num,"
-                    "wifi_chip2_ssid2_access_sta_num,wifi_chip1_ssid1_access_sta_num,wifi_chip2_ssid1_access_sta_num,"
-                    "wifi_chip1_ssid2_max_access_num,wifi_chip2_ssid2_max_access_num,wifi_chip1_ssid1_wifi_coverage,"
-                    "wifi_access_sta_num,sta_ip_status"
-                ),
-                "power_sensors": (
-                    "battery_value,battery_pers,battery_charging,battery_vol_percent,pm_modem_5g,pm_sensor_5g,"
-                    "pm_sensor_mdm,pm_sensor_ambient,pm_sensor_pa1"
-                ),
-                "misc": (
-                    "monthly_rx_bytes,monthly_tx_bytes,monthly_time,realtime_rx_bytes,realtime_tx_bytes,"
-                    "realtime_rx_thrpt,realtime_tx_thrpt,realtime_time,date_month,"
-                    "data_volume_limit_switch,data_volume_limit_size,data_volume_alert_percent,data_volume_limit_unit,"
-                    "roam_setting_option,upg_roam_switch,privacy_read_flag,is_night_mode,check_web_conflict,"
-                    "station_mac,lan_ipaddr,sms_received_flag,sms_unread_num,sts_received_flag,spn_name_data,"
-                    "spn_b1_flag,spn_b2_flag"
-                )
-            }
+                param_groups = {
+                    "system_info": (
+                        "wa_inner_version,cr_version,loginfo,new_version_state,current_upgrade_state,"
+                        "is_mandatory,modem_main_state,pin_status,signalbar,imei"
+                    ),
+                    "radio_network": (
+                        "network_type,network_provider,network_provider_fullname,rmcc,rmnc,mdm_mcc,mdm_mnc,"
+                        "rssi,ecio,ecio_1,ecio_2,ecio_3,ecio_4,rscp,rscp_1,rscp_2,rscp_3,rscp_4,lte_rsrp,"
+                        "lte_rsrp_1,lte_rsrp_2,lte_rsrp_3,lte_rsrp_4,lte_rsrq,lte_snr,lte_snr_1,lte_snr_2,lte_snr_3,lte_snr_4,"
+                        "lte_rssi,Z5g_rsrp,Z5g_rsrq,Z5g_snr,Z5g_SINR,Z5g_dlEarfcn,Z5g_CELL_ID,ZCELLINFO_band,"
+                        "enodeb_id,lte_pci,lte_pci_lock,lte_band,lte_ca_pcell_band,lte_ca_scell_band,lte_ca_scell_info,"
+                        "lte_multi_ca_scell_info,lte_multi_ca_scell_sig_info,lte_ca_scell_arfcn,lte_ca_scell_bandwidth,"
+                        "lte_ca_pcell_bandwidth,lte_ca_pcell_arfcn,lte_ca_pcell_freq,lte_earfcn_lock,nr5g_action_band,"
+                        "nr5g_action_channel,nr5g_action_nsa_band,nr5g_pci,nr5g_cell_id,nr_ca_pcell_band,nr_ca_pcell_freq,"
+                        "nr5g_nsa_band_lock,nr5g_sa_band_lock,nr_multi_ca_scell_info,wan_active_band,wan_active_channel,"
+                        "cell_id,tx_power,ngbr_cell_info,5g_rx0_rsrp,5g_rx1_rsrp"
+                    ),
+                    "connectivity": (
+                        "wan_ipaddr,wan_apn,wan_connect_status,wan_lte_ca,opms_wan_mode,opms_wan_auto_mode,"
+                        "ppp_status,pppoe_status,dial_mode,dhcp_wan_status,static_wan_status,static_wan_ipaddr,"
+                        "ip_passthrough_enabled,vpn_conn_status,ppp_dial_conn_fail_counter"
+                    ),
+                    "wifi": (
+                        "wifi_enable,wifi_onoff_state,wifi_5g_enable,wifi_chip_temp,wifi_dfs_status,ssid,EX_SSID1,EX_wifi_profile,"
+                        "m_ssid_enable,m_SSID2,wifi_chip1_ssid1_ssid,wifi_chip2_ssid1_ssid,wifi_chip1_ssid1_auth_mode,"
+                        "wifi_chip2_ssid1_auth_mode,wifi_chip1_ssid2_access_sta_num,wifi_chip2_ssid2_access_sta_num,"
+                        "wifi_chip1_ssid1_access_sta_num,wifi_chip2_ssid1_access_sta_num,wifi_chip1_ssid2_max_access_num,"
+                        "wifi_chip2_ssid2_max_access_num,wifi_chip1_ssid1_wifi_coverage,wifi_access_sta_num,sta_ip_status,"
+                        "guest_switch"
+                    ),
+                    "power_sensors": (
+                        "battery_value,battery_pers,battery_charging,battery_vol_percent,pm_modem_5g,pm_sensor_5g,"
+                        "pm_sensor_mdm,pm_sensor_ambient,pm_sensor_pa1"
+                    ),
+                    "misc": (
+                        "monthly_rx_bytes,monthly_tx_bytes,monthly_time,realtime_rx_bytes,realtime_tx_bytes,"
+                        "realtime_rx_thrpt,realtime_tx_thrpt,realtime_time,date_month,data_volume_limit_switch,"
+                        "data_volume_limit_size,data_volume_alert_percent,data_volume_limit_unit,roam_setting_option,"
+                        "upg_roam_switch,privacy_read_flag,is_night_mode,check_web_conflict,station_mac,lan_ipaddr,"
+                        "sms_received_flag,sms_unread_num,sts_received_flag,spn_name_data,spn_b1_flag,spn_b2_flag,"
+                        "simcard_roam"
+                    ),
+                    "dns_config": (
+                        "dns_mode,prefer_dns_manual,standby_dns_manual"
+                    ),
+                    "unclassified": (
+                        "RadioOff,apn_interface_version,bandwidth"
+                    )
+                }
+
 
             combined_data = {}
             url_base = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&multi_data=1&cmd="
