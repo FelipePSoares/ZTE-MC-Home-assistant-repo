@@ -455,40 +455,41 @@ class LastSMSSensor(ZTERouterEntity):
             return date_str
 #fixed indent outside of a class
 def format_ca_bands(ca_bands, nr5g_action_band):
-        _LOGGER.debug(f"Raw ca_bands input: {ca_bands}")
-        _LOGGER.debug(f"Raw nr5g_action_band input: {nr5g_action_band}")
-        
-        if not ca_bands:
-            _LOGGER.debug("No CA bands provided. Returning 'No CA'")
-            return "No CA"
-        
-        ca_bands_list = ca_bands.split(";")
-        _LOGGER.debug(f"Parsed CA bands list: {ca_bands_list}")
-        
-        ca_bands_formatted = []
-        
-        for band in ca_bands_list:
-            band_info = band.split(",")
-            _LOGGER.debug(f"Parsing CA band string: {band} -> split: {band_info}")
-            if len(band_info) >= 6:
-                try:
-                    band_id = band_info[3]
-                    bandwidth = band_info[5]
-                    formatted_band = f"B{band_id}(@{bandwidth}Mhz)"
-                    ca_bands_formatted.append(formatted_band)
-                    _LOGGER.debug(f"Formatted band: {formatted_band}")
-                except Exception as e:
-                    _LOGGER.warning(f"Failed to format band '{band}' due to: {e}")
-            else:
-                _LOGGER.warning(f"Band info has insufficient parts: {band_info}")
-                
-        if nr5g_action_band:
-            ca_bands_formatted.append(f"{nr5g_action_band}")
-            _LOGGER.debug(f"Appended NR5G action band: {nr5g_action_band}")
-            
-        formatted_result = "+".join(ca_bands_formatted)
-        _LOGGER.debug(f"Final formatted CA bands string: {formatted_result}")
-        return formatted_result
+    _LOGGER.debug(f"Raw ca_bands input: {ca_bands}")
+    _LOGGER.debug(f"Raw nr5g_action_band input: {nr5g_action_band}")
+
+    if not ca_bands:
+        _LOGGER.debug("No CA bands provided. Returning 'No CA'")
+        return "No CA"
+
+    ca_bands_formatted = []
+
+    for band in ca_bands.strip(';').split(';'):
+        if not band:
+            continue  # Skip empty strings after split
+
+        band_info = band.split(',')
+        _LOGGER.debug(f"Parsing CA band string: {band} -> split: {band_info}")
+
+        if len(band_info) >= 6:
+            try:
+                band_id = band_info[3]
+                bandwidth = band_info[5]
+                formatted_band = f"B{band_id}@{bandwidth}MHz"
+                ca_bands_formatted.append(formatted_band)
+                _LOGGER.debug(f"Formatted band: {formatted_band}")
+            except Exception as e:
+                _LOGGER.warning(f"Failed to format band '{band}' due to: {e}")
+        else:
+            _LOGGER.warning(f"Band info has insufficient parts: {band_info}")
+
+    if nr5g_action_band:
+        ca_bands_formatted.append(nr5g_action_band)
+        _LOGGER.debug(f"Appended NR5G action band: {nr5g_action_band}")
+
+    formatted_result = "+".join(ca_bands_formatted)
+    _LOGGER.debug(f"Final formatted CA bands string: {formatted_result}")
+    return formatted_result
 
 class ConnectedBandsSensor(ZTERouterEntity):
     def __init__(self, coordinator, disabled_by_default=False):
@@ -566,7 +567,7 @@ class ConnectedBandsSensor(ZTERouterEntity):
                 _LOGGER.error(f"Invalid cell_id for conversion to int: {cell_id}")
                 enb_id = ""
 
-            self._state = f"MAIN:B{main_band}(@{main_bandwidth}Mhz) CA:{ca_bands_formatted}"
+            self._state = f"MAIN:B{main_band}@{main_bandwidth}MHz CA:{ca_bands_formatted}"
             self._attributes = {
                 "rmcc": rmcc,
                 "rmnc": rmnc,

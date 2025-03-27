@@ -6,6 +6,7 @@ import sys
 import time
 import urllib3
 import urllib
+from urllib.parse import quote
 import logging
 from http.cookies import SimpleCookie
 import ssl
@@ -467,9 +468,8 @@ class zteRouter:
             return ""
 
     def zteinfo3(self):
-        logger.debug("Fetching ZTE info 3")
+        logger.debug("Fetching comprehensive ZTE info (zteinfo3) with hybrid splitting")
         try:
-            # Get LD and update cookies
             LD = self.get_LD()
             self.getCookie(username=self.username, password=self.password, LD=LD)
 
@@ -477,66 +477,89 @@ class zteRouter:
                 "Host": self.ip,
                 "Referer": f"{self.referer}index.html",
             }
-
             cookie_header = self.build_cookie_header()
             if cookie_header:
                 header['Cookie'] = cookie_header
 
-            # Main preferred full_cmd list (formatted dynamically)
-            full_cmds = (
-                "5g_rx0_rsrp,5g_rx1_rsrp,EX_SSID1,EX_wifi_profile,RadioOff,Z5g_CELL_ID,Z5g_SINR,Z5g_dlEarfcn,Z5g_rsrp,"
-                "Z5g_rsrq,Z5g_snr,ZCELLINFO_band,apn_interface_version,bandwidth,battery_charging,battery_pers,"
-                "battery_value,battery_vol_percent,cell_id,check_web_conflict,cr_version,current_upgrade_state,"
-                "data_volume_alert_percent,data_volume_limit_size,data_volume_limit_switch,data_volume_limit_unit,"
-                "date_month,dhcp_wan_status,dial_mode,dns_mode,ecio,ecio_1,ecio_2,ecio_3,ecio_4,enodeb_id,guest_switch,"
-                "imei,ip_passthrough_enabled,is_mandatory,is_night_mode,lan_ipaddr,loginfo,lte_band,lte_ca_pcell_arfcn,"
-                "lte_ca_pcell_band,lte_ca_pcell_bandwidth,lte_ca_pcell_freq,lte_ca_scell_arfcn,lte_ca_scell_band,"
-                "lte_ca_scell_bandwidth,lte_ca_scell_info,lte_earfcn_lock,lte_multi_ca_scell_info,"
-                "lte_multi_ca_scell_sig_info,lte_pci,lte_pci_lock,lte_rsrp,lte_rsrp_1,lte_rsrp_2,lte_rsrp_3,lte_rsrp_4,"
-                "lte_rsrq,lte_rssi,lte_snr,lte_snr_1,lte_snr_2,lte_snr_3,lte_snr_4,m_SSID2,m_ssid_enable,mdm_mcc,mdm_mnc,"
-                "modem_main_state,monthly_rx_bytes,monthly_time,monthly_tx_bytes,network_provider,"
-                "network_provider_fullname,network_type,new_version_state,ngbr_cell_info,nr5g_action_band,"
-                "nr5g_action_channel,nr5g_action_nsa_band,nr5g_cell_id,nr5g_nsa_band_lock,nr5g_pci,nr5g_sa_band_lock,"
-                "nr_ca_pcell_band,nr_ca_pcell_freq,nr_multi_ca_scell_info,opms_wan_auto_mode,opms_wan_mode,pin_status,"
-                "pm_modem_5g,pm_sensor_5g,pm_sensor_ambient,pm_sensor_mdm,pm_sensor_pa1,ppp_dial_conn_fail_counter,"
-                "ppp_status,pppoe_status,prefer_dns_manual,privacy_read_flag,realtime_rx_bytes,realtime_rx_thrpt,"
-                "realtime_time,realtime_tx_bytes,realtime_tx_thrpt,rmcc,rmnc,roam_setting_option,rscp,rscp_1,rscp_2,"
-                "rscp_3,rscp_4,rssi,signalbar,simcard_roam,sms_received_flag,sms_unread_num,spn_b1_flag,spn_b2_flag,"
-                "spn_name_data,ssid,sta_ip_status,standby_dns_manual,static_wan_ipaddr,static_wan_status,station_mac,"
-                "sts_received_flag,tx_power,upg_roam_switch,vpn_conn_status,wa_inner_version,wan_active_band,"
-                "wan_active_channel,wan_apn,wan_connect_status,wan_ipaddr,wan_lte_ca,wifi_5g_enable,wifi_access_sta_num,"
-                "wifi_chip1_ssid1_access_sta_num,wifi_chip1_ssid1_auth_mode,wifi_chip1_ssid1_ssid,"
-                "wifi_chip1_ssid1_wifi_coverage,wifi_chip1_ssid2_access_sta_num,wifi_chip1_ssid2_max_access_num,"
-                "wifi_chip2_ssid1_access_sta_num,wifi_chip2_ssid1_auth_mode,wifi_chip2_ssid1_ssid,"
-                "wifi_chip2_ssid2_access_sta_num,wifi_chip2_ssid2_max_access_num,wifi_chip_temp,wifi_dfs_status,"
-                "wifi_enable,wifi_onoff_state"
-            )
+            param_groups = {
+                "system_info": (
+                    "wa_inner_version,cr_version,loginfo,new_version_state,current_upgrade_state,"
+                    "is_mandatory,modem_main_state,ld,pin_status,signalbar"
+                ),
+                "radio_network": (
+                    "network_type,network_provider,network_provider_fullname,rmcc,rmnc,mdm_mcc,mdm_mnc,"
+                    "rssi,ecio,ecio_1,ecio_2,ecio_3,ecio_4,rscp,rscp_1,rscp_2,rscp_3,rscp_4,lte_rsrp,"
+                    "lte_rsrp_1,lte_rsrp_2,lte_rsrp_3,lte_rsrp_4,lte_rsrq,lte_snr,lte_snr_1,lte_snr_2,lte_snr_3,lte_snr_4,"
+                    "lte_rssi,Z5g_rsrp,Z5g_rsrq,Z5g_snr,Z5g_SINR,Z5g_dlEarfcn,Z5g_CELL_ID,ZCELLINFO_band,"
+                    "enodeb_id,lte_pci,lte_pci_lock,lte_band,lte_ca_pcell_band,lte_ca_scell_band,lte_ca_scell_info,"
+                    "lte_multi_ca_scell_info,lte_multi_ca_scell_sig_info,lte_ca_scell_arfcn,lte_ca_scell_bandwidth,"
+                    "lte_ca_pcell_bandwidth,lte_ca_pcell_arfcn,lte_ca_pcell_freq,lte_earfcn_lock,nr5g_action_band,"
+                    "nr5g_action_channel,nr5g_action_nsa_band,nr5g_pci,nr5g_cell_id,nr_ca_pcell_band,nr_ca_pcell_freq,"
+                    "nr5g_nsa_band_lock,nr5g_sa_band_lock,nr_multi_ca_scell_info,wan_active_band,wan_active_channel,"
+                    "cell_id,tx_power,ngbr_cell_info"
+                ),
+                "connectivity": (
+                    "wan_ipaddr,wan_apn,wan_connect_status,wan_lte_ca,opms_wan_mode,opms_wan_auto_mode,"
+                    "ppp_status,pppoe_status,dial_mode,dhcp_wan_status,static_wan_status,static_wan_ipaddr,"
+                    "ip_passthrough_enabled,vpn_conn_status"
+                ),
+                "wifi": (
+                    "wifi_enable,wifi_onoff_state,wifi_5g_enable,wifi_chip_temp,wifi_dfs_status,"
+                    "ssid,EX_SSID1,EX_wifi_profile,m_ssid_enable,wifi_chip1_ssid1_ssid,wifi_chip2_ssid1_ssid,"
+                    "wifi_chip1_ssid1_auth_mode,wifi_chip2_ssid1_auth_mode,wifi_chip1_ssid2_access_sta_num,"
+                    "wifi_chip2_ssid2_access_sta_num,wifi_chip1_ssid1_access_sta_num,wifi_chip2_ssid1_access_sta_num,"
+                    "wifi_chip1_ssid2_max_access_num,wifi_chip2_ssid2_max_access_num,wifi_chip1_ssid1_wifi_coverage,"
+                    "wifi_access_sta_num,sta_ip_status"
+                ),
+                "power_sensors": (
+                    "battery_value,battery_pers,battery_charging,battery_vol_percent,pm_modem_5g,pm_sensor_5g,"
+                    "pm_sensor_mdm,pm_sensor_ambient,pm_sensor_pa1"
+                ),
+                "misc": (
+                    "monthly_rx_bytes,monthly_tx_bytes,monthly_time,realtime_rx_bytes,realtime_tx_bytes,"
+                    "realtime_rx_thrpt,realtime_tx_thrpt,realtime_time,date_month,"
+                    "data_volume_limit_switch,data_volume_limit_size,data_volume_alert_percent,data_volume_limit_unit,"
+                    "roam_setting_option,upg_roam_switch,privacy_read_flag,is_night_mode,check_web_conflict,"
+                    "station_mac,lan_ipaddr,sms_received_flag,sms_unread_num,sts_received_flag,spn_name_data,"
+                    "spn_b1_flag,spn_b2_flag"
+                )
+            }
 
-            cmd_url = (
-                f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?"
-                f"isTest=false&multi_data=1&sms_received_flag_flag=0&sts_received_flag_flag=0"
-                f"&cmd={full_cmds.replace(',', '%2C')}"
-            )
+            combined_data = {}
+            url_base = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&multi_data=1&cmd="
 
-            response = s.request('GET', cmd_url, headers=header)
-            data = response.data.decode('utf-8')
+            for group_name, param_str in param_groups.items():
+                param_list = param_str.split(',')
 
-            # If the result is empty/invalid, fallback to original hardcoded style
-            if not data or data.strip() in ["", "null", "{}", "[]"]:
-                logger.warning("Primary cmd list returned no data. Falling back to hardcoded static cmd URL.")
-                fallback_url = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&multi_data=1&sms_received_flag_flag=0&sts_received_flag_flag=0&cmd=wa_inner_version%2Ccr_version%2Cnetwork_type%2Crssi%2Crscp%2Crmcc%2Crmnc%2Cenodeb_id%2Clte_rsrq%2Clte_rsrp%2CZ5g_snr%2CZ5g_rsrp%2CZCELLINFO_band%2CZ5g_dlEarfcn%2Clte_ca_pcell_arfcn%2Clte_ca_pcell_band%2Clte_ca_scell_band%2Clte_ca_pcell_bandwidth%2Clte_ca_scell_info%2Clte_ca_scell_bandwidth%2Cwan_lte_ca%2Clte_pci%2CZ5g_CELL_ID%2CZ5g_SINR%2Ccell_id%2Clte_ca_scell_arfcn%2Clte_multi_ca_scell_info%2Cwan_active_band%2Cnr5g_pci%2Cnr5g_action_band%2Cnr5g_cell_id%2Clte_snr%2Cecio%2Cwan_active_channel%2Cnr5g_action_channel%2Cngbr_cell_info%2Cmonthly_tx_bytes%2Cmonthly_rx_bytes%2Clte_pci_lock%2Clte_earfcn_lock%2Cwan_ipaddr%2Cwan_apn%2Cpm_sensor_mdm%2Cpm_modem_5g%2Cmodem_main_state%2Cpin_status%2Copms_wan_mode%2Copms_wan_auto_mode%2Cloginfo%2Cnew_version_state%2Ccurrent_upgrade_state%2Cis_mandatory%2Cwifi_dfs_status%2Cbattery_value%2Cppp_dial_conn_fail_counter%2Cwifi_chip1_ssid1_auth_mode%2Cwifi_chip2_ssid1_auth_mode%2Cnetwork_provider%2Csimcard_roam%2Cspn_name_data%2Cspn_b1_flag%2Cspn_b2_flag%2Cwifi_onoff_state%2Cwifi_chip1_ssid1_ssid%2Cwifi_chip2_ssid1_ssid%2Cpppoe_status%2Cdhcp_wan_status%2Cstatic_wan_status%2Cmdm_mcc%2Cmdm_mnc%2CEX_SSID1%2Csta_ip_status%2CEX_wifi_profile%2Cm_ssid_enable%2CRadioOff%2Cwifi_chip1_ssid1_access_sta_num%2Cwifi_chip2_ssid1_access_sta_num%2Clan_ipaddr%2Cstation_mac%2Cwifi_access_sta_num%2Cbattery_charging%2Cbattery_vol_percent%2Cbattery_pers%2Crealtime_tx_bytes%2Crealtime_rx_bytes%2Crealtime_time%2Crealtime_tx_thrpt%2Crealtime_rx_thrpt%2Cmonthly_time%2Cdate_month%2Cdata_volume_limit_switch%2Cdata_volume_limit_size%2Cdata_volume_alert_percent%2Cdata_volume_limit_unit%2Croam_setting_option%2Cupg_roam_switch%2Cssid%2Cwifi_enable%2Cwifi_5g_enable%2Ccheck_web_conflict%2Cdial_mode%2Cprivacy_read_flag%2Cis_night_mode%2Cvpn_conn_status%2Cwan_connect_status%2Csms_received_flag%2Csts_received_flag%2Csms_unread_num%2Cwifi_chip1_ssid2_access_sta_num%2Cwifi_chip2_ssid2_access_sta_num%2Cstatic_wan_ipaddr%2Cdns_mode%2Cprefer_dns_manual%2Cstandby_dns_manual%2Csignalbar%2Cppp_status"
-                response = s.request('GET', fallback_url, headers=header)
-                data = response.data.decode('utf-8')
+                max_params_per_request = 60
+                chunks = [
+                    param_list[i:i + max_params_per_request]
+                    for i in range(0, len(param_list), max_params_per_request)
+                ]
 
-            # Update cookies
-            set_cookie_header = response.headers.get('Set-Cookie', '')
-            self.update_cookies(set_cookie_header)
+                for idx, chunk in enumerate(chunks):
+                    cmd_encoded = quote(",".join(chunk))
+                    url = url_base + cmd_encoded
 
-            logger.info("Fetched ZTE info 3 successfully")
-            return data
+                    response = s.request('GET', url, headers=header)
+                    raw_data = response.data.decode('utf-8')
+
+                    try:
+                        parsed = json.loads(raw_data)
+                        combined_data.update(parsed)
+                        logger.debug(f"Fetched {group_name} (chunk {idx+1}) with {len(parsed)} values")
+                    except Exception as ex:
+                        logger.warning(f"Failed to parse {group_name} (chunk {idx+1}): {ex}")
+                        continue
+
+                    set_cookie_header = response.headers.get('Set-Cookie', '')
+                    self.update_cookies(set_cookie_header)
+
+            logger.info("Fetched comprehensive ZTE info successfully using hybrid strategy")
+            return json.dumps(combined_data)
 
         except Exception as e:
-            logger.error(f"Failed to fetch ZTE info 3: {e}")
+            logger.error(f"Failed to fetch comprehensive ZTE info: {e}")
             return ""
 
     def ztesmsinfo(self):
