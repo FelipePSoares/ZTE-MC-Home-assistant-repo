@@ -4,6 +4,8 @@ import logging
 import subprocess
 import asyncio
 from datetime import datetime, timedelta
+# ✅ Correct
+from homeassistant.helpers.entity_registry import async_get
 from homeassistant.helpers.entity import Entity, EntityCategory
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -108,21 +110,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         station_list_parsed = {}
     coordinator._data.update(station_list_parsed)
     sensors.append(ConnectedDevicesSensor(coordinator, disabled_by_default=False))
+    
+    # Prevent fallback from creating sensors for list-type data
+    handled_keys.update(["station_list", "lan_station_list", "all_devices"])
 
-    # --- FLUX sensors ---
+# --- FLUX sensors ---
+    registry = async_get(hass)
+
     if enable_flux:
+        _LOGGER.info("FLUX sensors are enabled. Adding sensors.")
         for key in FLUX_KEYS:
             if key not in handled_keys:
-                if key == "flux_total_usage":
-                    _LOGGER.debug(f"[FLUX] Registering FLUX Total Usage Sensor: {key}")
-                    sensors.append(ZTEFluxTotalUsageSensor(coordinator))
+                if key in {"flux_total_usage", "flux_monthly_usage"}:
+                    if "flux_total_usage" not in handled_keys:
+                        _LOGGER.debug(f"[FLUX] Registering FLUX Total Usage Sensor: {key}")
+                        sensors.append(ZTEFluxTotalUsageSensor(coordinator))
+                        handled_keys.add("flux_total_usage")
                 else:
                     _LOGGER.debug(f"[FLUX] Registering FLUX sensor: {key}")
                     sensors.append(ZTEFluxSensor(coordinator, key))
-                handled_keys.add(key)
+                    handled_keys.add(key)
     else:
-        _LOGGER.info("FLUX sensors are disabled by user config. Skipping creation.")
+        _LOGGER.info("FLUX sensors are disabled by user config. Removing FLUX sensors from registry.")
 
+        entity_ids = list(registry.entities.keys())  # Avoid modifying during iteration
+
+        for key in FLUX_KEYS:
+            unique_id = f"{DOMAIN}_{ip_entry}_stat_{key}"
+            for entity_id in entity_ids:
+                entry = registry.entities.get(entity_id)
+                if entry and entry.domain == "sensor" and entry.unique_id == unique_id:
+                    _LOGGER.info(f"[FLUX] Removing sensor entity: {entity_id}")
+                    registry.async_remove(entity_id)
 
     # --- Selected other formatted sensors ---
     formatted_keys = {"connection_uptime"}

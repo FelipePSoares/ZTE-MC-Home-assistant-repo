@@ -477,7 +477,6 @@ FLUX_KEYS = {
     "flux_data_volume_limit_unit",
     "date_month",
     "flux_total_usage",
-    "flux_monthly_usage",
 }
 
 SENSOR_NAMES.update({

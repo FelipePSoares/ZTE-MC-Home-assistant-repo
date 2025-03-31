@@ -1,7 +1,9 @@
 from homeassistant import config_entries
 from homeassistant.core import callback
 import voluptuous as vol
+
 from .const import DOMAIN, DEFAULT_USERNAME
+
 
 class ZTERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for ZTE Router."""
@@ -22,7 +24,9 @@ class ZTERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Schema for selecting the router type
         model_schema = vol.Schema({
-            vol.Required("router_type", default="MC801A"): vol.In(["MC801A", "MC889", "MC888", "MC888A", "MC889A"]),
+            vol.Required("router_type", default="MC801A"): vol.In([
+                "MC801A", "MC889", "MC888", "MC888A", "MC889A"
+            ]),
         })
 
         return self.async_show_form(
@@ -48,10 +52,10 @@ class ZTERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional("sms_check_interval", default=200): int,
             vol.Required("phone_number", default="13909"): str,  # Existing phone number
             vol.Required("sms_message", default="BRZINA"): str,  # Existing message
-            vol.Optional("phone_number_1", default=""): str,  # New Phone Number 1
-            vol.Optional("message_1", default=""): str,       # New Message 1
-            vol.Optional("phone_number_2", default=""): str,  # New Phone Number 2
-            vol.Optional("message_2", default=""): str,       # New Message 2
+            vol.Optional("phone_number_1", default=""): str,     # New Phone Number 1
+            vol.Optional("message_1", default=""): str,          # New Message 1
+            vol.Optional("phone_number_2", default=""): str,     # New Phone Number 2
+            vol.Optional("message_2", default=""): str,          # New Message 2
             vol.Optional("create_automation_sms", default=True): bool,
             vol.Optional("create_automation_clean", default=False): bool,
             vol.Optional("create_automation_reboot", default=False): bool,
@@ -69,12 +73,12 @@ class ZTERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="config", data_schema=data_schema, errors=errors
         )
 
-
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
         """Return the options flow handler."""
         return ZTERouterOptionsFlowHandler(config_entry)
+
 
 class ZTERouterOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle an options flow for ZTE Router."""
