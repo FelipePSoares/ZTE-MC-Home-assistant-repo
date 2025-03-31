@@ -131,6 +131,13 @@ class zteRouter:
         logger.info("Invalidating session cookie")
         self.stok = None
         self.session_expiry = datetime.min
+        if os.path.exists(self.SESSION_FILE):
+            try:
+                os.remove(self.SESSION_FILE)
+                logger.info("Old session file deleted.")
+            except Exception as e:
+                logger.warning(f"Could not delete session file: {e}")
+
 
     def request_with_session(self, method, url, headers=None, body=None):
         if headers is None:
@@ -337,8 +344,27 @@ class zteRouter:
 
         self.load_session()
         if self.is_session_valid():
-            logger.info("Reusing existing session cookie")
-            return self.stok
+            logger.info("Reusing existing session cookie – validating with router...")
+
+            # Perform a small harmless test call to ensure session is truly still valid
+            test_url = f"{self.referer}goform/goform_get_cmd_process?isTest=false&cmd=wa_inner_version"
+            header = {"Referer": self.referer}
+            cookie_header = self.build_cookie_header()
+            if cookie_header:
+                header['Cookie'] = cookie_header
+            try:
+                r = s.request("GET", test_url, headers=header)
+                if r.status == 200 and "wa_inner_version" in r.data.decode("utf-8"):
+                    logger.info("Router accepted existing session – continuing.")
+                    return self.stok
+                else:
+                    logger.warning("Router rejected session – will re-login.")
+            except Exception as e:
+                logger.warning(f"Session test failed, re-authenticating: {e}")
+
+        # If session was not valid or rejected
+        self.invalidate_session()
+        logger.info("Fetching new session from router")
 
         header = {"Referer": self.referer}
         cookie_header = self.build_cookie_header()
@@ -347,7 +373,6 @@ class zteRouter:
 
         hashPassword = self.hash(password).upper()
         ztePass = self.hash(hashPassword + LD).upper()
-
         AD = self.get_AD()
 
         if username:
@@ -391,6 +416,7 @@ class zteRouter:
         except Exception as e:
             logger.error(f"Failed to obtain cookie: {e}")
             raise
+
 
 
     def get_RD(self):
@@ -661,61 +687,84 @@ class zteRouter:
             logger.error(f"Failed to fetch comprehensive ZTE info: {e}")
             return ""
 
-    def zteinfo4(self):
+    def zteinfo4(self, force_refresh=False, retry=1, delay=2):
         """
-        Fetch ZTE modem info for both 'station_list' (WiFi) and 'lan_station_list' (LAN),
-        tag each with type, and return a merged list under 'all_devices'.
+        Fetch and merge 'station_list' (WiFi) and 'lan_station_list' (LAN) from the ZTE router.
+        Tags each device with its connection type and returns a combined JSON string.
+
+        Args:
+            force_refresh (bool): If True, invalidates and renews the session before querying.
+            retry (int): Number of retries if data is empty.
+            delay (int): Delay between retries in seconds.
 
         Returns:
-            str: JSON string of the combined result, or empty string on error.
+            str: JSON string of the combined result with 'station_list', 'lan_station_list', and 'all_devices'.
         """
         logger.debug("Fetching ZTE info: station_list and lan_station_list (tagged & merged)")
-        try:
-            LD = self.get_LD()
-            self.getCookie(username=self.username, password=self.password, LD=LD)
 
-            header = {
-                "Host": self.ip,
-                "Referer": f"{self.referer}index.html",
-            }
+        for attempt in range(retry + 1):
+            try:
+                # Optional session refresh
+                if force_refresh or attempt > 0:
+                    self.invalidate_session()
 
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
+                LD = self.get_LD()
+                self.getCookie(username=self.username, password=self.password, LD=LD)
 
-            combined_data = {}
+                header = {
+                    "Host": self.ip,
+                    "Referer": f"{self.referer}index.html",
+                }
+                cookie_header = self.build_cookie_header()
+                if cookie_header:
+                    header['Cookie'] = cookie_header
 
-            for param in ["station_list", "lan_station_list"]:
-                cmd_str = quote(param)
-                url = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&cmd={cmd_str}"
-                response = self.request_with_session('GET', url, headers=header)
-                raw_data = response.data.decode('utf-8')
+                combined_data = {"station_list": [], "lan_station_list": [], "all_devices": []}
 
-                set_cookie_header = response.headers.get('Set-Cookie', '')
-                self.update_cookies(set_cookie_header)
+                for param in ["station_list", "lan_station_list"]:
+                    cmd_str = quote(param)
+                    url = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&cmd={cmd_str}"
+                    response = self.request_with_session('GET', url, headers=header)
+                    raw_data = response.data.decode('utf-8')
 
-                try:
-                    parsed = json.loads(raw_data)
+                    # Update cookies if available
+                    set_cookie_header = response.headers.get('Set-Cookie', '')
+                    self.update_cookies(set_cookie_header)
 
-                    # Tag each device with type: WiFi or LAN
-                    for item in parsed.get(param, []):
-                        item["type"] = "WiFi" if param == "station_list" else "LAN"
+                    logger.debug(f"Raw response for {param}: {raw_data[:300]}...")
 
-                    combined_data[param] = parsed.get(param, [])
-                    logger.debug(f"Fetched {param} with {len(parsed.get(param, []))} entries")
-                except Exception as ex:
-                    logger.warning(f"Failed to parse {param}: {ex}")
-                    combined_data[param] = []
+                    try:
+                        parsed = json.loads(raw_data)
+                        device_list = parsed.get(param, [])
 
-            # ✅ Merge all into one list
-            combined_data["all_devices"] = combined_data["station_list"] + combined_data["lan_station_list"]
-            logger.info(f"Fetched and merged {len(combined_data['all_devices'])} total devices")
+                        # Tag each device
+                        for item in device_list:
+                            item["type"] = "WiFi" if param == "station_list" else "LAN"
 
-            return json.dumps(combined_data)
+                        combined_data[param] = device_list
+                        logger.debug(f"Fetched {param} with {len(device_list)} entries")
+                    except Exception as ex:
+                        logger.warning(f"Failed to parse {param}: {ex}")
 
-        except Exception as e:
-            logger.error(f"Failed to fetch ZTE info: {e}")
-            return ""
+                # Merge both lists
+                combined_data["all_devices"] = combined_data["station_list"] + combined_data["lan_station_list"]
+                total = len(combined_data["all_devices"])
+                logger.info(f"Fetched and merged {total} total devices")
+
+                # Break retry loop if data is valid
+                if total > 0 or attempt == retry:
+                    return json.dumps(combined_data)
+
+                logger.warning(f"No devices found – retrying in {delay} seconds...")
+                time.sleep(delay)
+
+            except Exception as e:
+                logger.error(f"Failed to fetch ZTE device list: {e}")
+                if attempt == retry:
+                    return ""
+
+        return ""
+
 
 
     def ztesmsinfo(self):
@@ -811,87 +860,107 @@ class zteRouter:
             logger.error(f"Failed to delete SMS: {e}")
             return None
 
-    def parsesms(self):
+    def parsesms(self, force_refresh=False, retry=1, delay=2):
+        """
+        Fetch and decode all SMS messages stored on the router.
+
+        Args:
+            force_refresh (bool): If True, invalidate session before fetching.
+            retry (int): Number of retry attempts on failure or empty response.
+            delay (int): Delay between retries in seconds.
+
+        Returns:
+            str: JSON-formatted string of SMS messages.
+        """
         logger.debug("Starting SMS parsing process")
-        try:
-            LD = self.get_LD()
-            self.getCookie(username=self.username, password=self.password, LD=LD)
 
-            header = {"Referer": self.referer}
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
-
-            payload = {
-                'cmd': 'sms_data_total',
-                'page': '0',
-                'data_per_page': '5000',
-                'mem_store': '1',
-                'tags': '10',
-                'order_by': 'order by id desc'
-            }
-
-            encoded_payload = urllib.parse.urlencode(payload)
-            url = self.referer + "goform/goform_get_cmd_process?" + encoded_payload
-
-            r = self.request_with_session('GET', url, headers=header)
-            response_text = r.data.decode('utf-8', errors='replace')
-
-            logger.debug(f"Raw SMS response: {repr(response_text[:300])}...")  # Preview first 300 chars
-
-            # Clean invalid characters
-            sanitized_text = clean_control_chars(response_text)
-            sanitized_text = sanitized_text.replace('HR�Telekom', 'HR Telekom')  # Specific fix
-
+        for attempt in range(retry + 1):
             try:
-                response_json = json.loads(sanitized_text)
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON decoding failed: {e}")
-                return ""
+                if force_refresh or attempt > 0:
+                    self.invalidate_session()
 
-            # Ensure 'messages' exists and is a list
-            if 'messages' not in response_json or not isinstance(response_json['messages'], list):
-                logger.warning("'messages' key is missing or invalid in SMS response; defaulting to empty list.")
-                response_json['messages'] = []
+                LD = self.get_LD()
+                self.getCookie(username=self.username, password=self.password, LD=LD)
 
-            messages = response_json['messages']
-            logger.info(f"Fetched {len(messages)} SMS messages")
+                header = {"Referer": self.referer}
+                cookie_header = self.build_cookie_header()
+                if cookie_header:
+                    header['Cookie'] = cookie_header
 
-            decode_errors = 0
-            for item in messages:
-                try:
-                    original_content = item.get('content', '')
-                    decoded = hex2utf(original_content)
-                    item['content'] = decoded
-                except Exception as e:
-                    logger.warning(f"Failed to decode SMS content: {e}")
-                    decode_errors += 1
-
-            if decode_errors:
-                logger.warning(f"{decode_errors} messages failed to decode cleanly.")
-
-            # Return dummy message if no SMS exists
-            if not messages:
-                dummy_message = {
-                    'id': '999',
-                    'number': 'DUMMY',
-                    'content': 'NO SMS IN MEMORY',
-                    'tag': '1',
-                    'date': datetime.now().strftime('%y,%m,%d,%H,%M,%S,+2'),
-                    'draft_group_id': '',
-                    'received_all_concat_sms': '1',
-                    'concat_sms_total': '0',
-                    'concat_sms_received': '0',
-                    'sms_class': '4'
+                payload = {
+                    'cmd': 'sms_data_total',
+                    'page': '0',
+                    'data_per_page': '5000',
+                    'mem_store': '1',
+                    'tags': '10',
+                    'order_by': 'order by id desc'
                 }
-                response_json['messages'].append(dummy_message)
 
-            logger.info("Parsed all SMS messages successfully")
-            return json.dumps(response_json, indent=2)
+                url = self.referer + "goform/goform_get_cmd_process?" + urllib.parse.urlencode(payload)
+                r = self.request_with_session('GET', url, headers=header)
+                response_text = r.data.decode('utf-8', errors='replace')
 
-        except Exception as e:
-            logger.error(f"Failed to parse SMS: {e}")
-            return ""
+                logger.debug(f"Raw SMS response (truncated): {repr(response_text[:300])}...")
+
+                sanitized_text = clean_control_chars(response_text)
+                sanitized_text = sanitized_text.replace('HR�Telekom', 'HR Telekom')  # Custom fix
+
+                try:
+                    response_json = json.loads(sanitized_text)
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON decoding failed: {e}")
+                    if attempt == retry:
+                        return ""
+                    time.sleep(delay)
+                    continue
+
+                # Ensure 'messages' exists
+                if 'messages' not in response_json or not isinstance(response_json['messages'], list):
+                    logger.warning("'messages' key missing or invalid, defaulting to empty list.")
+                    response_json['messages'] = []
+
+                messages = response_json['messages']
+                logger.info(f"Fetched {len(messages)} SMS messages")
+
+                decode_errors = 0
+                for item in messages:
+                    try:
+                        original_content = item.get('content', '')
+                        decoded = hex2utf(original_content)
+                        item['content'] = decoded
+                    except Exception as e:
+                        logger.warning(f"Failed to decode SMS content: {e}")
+                        decode_errors += 1
+
+                if decode_errors:
+                    logger.warning(f"{decode_errors} messages failed to decode cleanly.")
+
+                # If no messages, insert dummy
+                if not messages:
+                    dummy_message = {
+                        'id': '999',
+                        'number': 'DUMMY',
+                        'content': 'NO SMS IN MEMORY',
+                        'tag': '1',
+                        'date': datetime.now().strftime('%y,%m,%d,%H,%M,%S,+2'),
+                        'draft_group_id': '',
+                        'received_all_concat_sms': '1',
+                        'concat_sms_total': '0',
+                        'concat_sms_received': '0',
+                        'sms_class': '4'
+                    }
+                    response_json['messages'].append(dummy_message)
+
+                logger.info("Parsed all SMS messages successfully")
+                return json.dumps(response_json, indent=2)
+
+            except Exception as e:
+                logger.error(f"Failed to parse SMS (attempt {attempt + 1}): {e}")
+                if attempt == retry:
+                    return ""
+                time.sleep(delay)
+
+        return ""
 
 
     def connect_data(self):
@@ -1048,7 +1117,7 @@ if __name__ == "__main__":
             result = zte.ztereboot()
             print(result)
         elif command == 5:
-            result = zte.parsesms()
+            result = zte.parsesms(force_refresh=True, retry=3, delay=3)
             if result:
                 data = json.loads(result)
                 ids = [msg['id'] for msg in data['messages']]
@@ -1061,7 +1130,7 @@ if __name__ == "__main__":
                     logger.info("No SMS in memory")
                     sys.exit(0)
         elif command == 6:
-            result = zte.parsesms()
+            result = zte.parsesms(force_refresh=True, retry=3, delay=3)
             if result:
                 test = json.loads(result)
                 if test["messages"]:
@@ -1116,7 +1185,7 @@ if __name__ == "__main__":
         elif command == 15:
             result = zte.setdata_mode("WL_AND_5G")
         elif command == 16:
-            result = zte.zteinfo4()
+            result = zte.zteinfo4(force_refresh=True, retry=2, delay=3)
             print(result)
         else:
             print(f"Invalid command: {command}")

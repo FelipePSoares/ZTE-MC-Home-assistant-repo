@@ -17,8 +17,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     # Merge entry.data with entry.options. entry.options will override any values in entry.data.
     config = {**entry.data, **entry.options}
 
-    ping_interval = config.get("ping_interval", 60)
-    sms_check_interval = config.get("sms_check_interval", 100)
+    #ping_interval = config.get("ping_interval", 60)
+    #sms_check_interval = config.get("sms_check_interval", 100)
+    ping_interval = entry.options.get("ping_interval", 60)
+    sms_check_interval = entry.options.get("sms_check_interval", 100)
     router_type = config.get("router_type", "MC801A")
     username = config.get("router_username") if router_type in ["MC888A", "MC889A"] else None
 

@@ -47,8 +47,8 @@ class ZTERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         base_schema = {
             vol.Required("router_ip"): str,
             vol.Required("router_password"): str,
-            vol.Optional("ping_interval", default=100): int,
-            vol.Optional("sms_check_interval", default=200): int,
+            #vol.Optional("ping_interval", default=100): int,
+            #vol.Optional("sms_check_interval", default=200): int,
             vol.Required("phone_number", default="13909"): str,
             vol.Required("sms_message", default="BRZINA"): str,
             vol.Optional("phone_number_1", default=""): str,
