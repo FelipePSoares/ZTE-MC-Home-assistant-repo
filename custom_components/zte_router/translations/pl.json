@@ -1,0 +1,64 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Wybierz model routera",
+                "description": "Wybierz model swojego routera ZTE.",
+                "data": {
+                    "router_type": "Model routera",
+                    "has_username": "Router używa nazwy użytkownika"
+                }
+            },
+            "config": {
+                "title": "Skonfiguruj router ZTE",
+                "description": "Wprowadź wymagane informacje, aby skonfigurować integrację routera ZTE.",
+                "data": {
+                    "router_ip": "Adres IP routera",
+                    "router_password": "Hasło routera",
+                    "router_username": "Nazwa użytkownika routera (jeśli dotyczy)",
+                    "ping_interval": "Interwał pingowania (sekundy)",
+                    "sms_check_interval": "Interwał sprawdzania SMS (sekundy)",
+                    "monthly_usage_threshold": "Miesięczny limit danych (GB)",
+                    "phone_number": "Numer telefonu",
+                    "sms_message": "Wiadomość SMS",
+                    "phone_number_1": "Numer telefonu 1",
+                    "message_1": "Wiadomość 1",
+                    "phone_number_2": "Numer telefonu 2",
+                    "message_2": "Wiadomość 2",
+                    "create_automation_sms": "Utwórz automatyzację SMS",
+                    "create_automation_clean": "Utwórz automatyzację czyszczenia pamięci SMS",
+                    "create_automation_reboot": "Utwórz automatyzację restartu",
+                    "enable_flux_sensors": "Włącz czujniki FLUX – tylko nowe wersje FW MC88x"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Nie udało się połączyć z routerem. Sprawdź adres IP i spróbuj ponownie."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Opcje routera ZTE",
+                "data": {
+                    "router_ip": "Adres IP routera",
+                    "router_password": "Hasło routera",
+                    "router_username": "Nazwa użytkownika routera (jeśli dotyczy)",
+                    "ping_interval": "Interwał pingowania (sekundy)",
+                    "sms_check_interval": "Interwał sprawdzania SMS (sekundy)",
+                    "monthly_usage_threshold": "Miesięczny limit danych (GB)",
+                    "phone_number": "Numer telefonu",
+                    "sms_message": "Wiadomość SMS",
+                    "phone_number_1": "Numer telefonu 1",
+                    "message_1": "Wiadomość 1",
+                    "phone_number_2": "Numer telefonu 2",
+                    "message_2": "Wiadomość 2",
+                    "create_automation_sms": "Utwórz automatyzację SMS",
+                    "create_automation_clean": "Utwórz automatyzację czyszczenia pamięci SMS",
+                    "create_automation_reboot": "Utwórz automatyzację restartu",
+                    "enable_flux_sensors": "Włącz czujniki FLUX – tylko nowe wersje FW MC88x"
+                }
+            }
+        }
+    }
+}

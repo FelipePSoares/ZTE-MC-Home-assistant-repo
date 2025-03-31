@@ -27,7 +27,7 @@
                     "create_automation_sms": "Create SMS Automation",
                     "create_automation_clean": "Create Clean SMS Memory Automation",
                     "create_automation_reboot": "Create Reboot Automation",
-                    "enable_flux_sensors": "Enable FLUX sensors"
+                    "enable_flux_sensors": "Enable FLUX sensors - Only new FW MC88x editions"
                 }
             }
         },
@@ -55,7 +55,7 @@
                     "create_automation_sms": "Create SMS Automation",
                     "create_automation_clean": "Create Clean SMS Memory Automation",
                     "create_automation_reboot": "Create Reboot Automation",
-                    "enable_flux_sensors": "Enable FLUX sensors"
+                    "enable_flux_sensors": "Enable FLUX sensors - Only new FW MC88x editions"
                 }
             }
         }

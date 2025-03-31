@@ -27,7 +27,7 @@
                     "create_automation_sms": "SMS-Automatisierung erstellen",
                     "create_automation_clean": "Automatisches Löschen des SMS-Speichers erstellen",
                     "create_automation_reboot": "Neustart-Automatisierung erstellen",
-                    "enable_flux_sensors": "FLUX sensors"
+                    "enable_flux_sensors": "FLUX sensors - Nur neue FW MC88x-Editionen"
                 }
             }
         },
@@ -55,7 +55,7 @@
                     "create_automation_sms": "SMS-Automatisierung erstellen",
                     "create_automation_clean": "Automatisches Löschen des SMS-Speichers erstellen",
                     "create_automation_reboot": "Neustart-Automatisierung erstellen",
-                    "enable_flux_sensors": "FLUX sensors"
+                    "enable_flux_sensors": "FLUX sensors - Nur neue FW MC88x-Editionen"
                 }
             }
         }

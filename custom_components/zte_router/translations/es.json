@@ -1,0 +1,64 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Selecciona el modelo del router",
+                "description": "Selecciona tu modelo de router ZTE.",
+                "data": {
+                    "router_type": "Modelo del router",
+                    "has_username": "El router usa nombre de usuario"
+                }
+            },
+            "config": {
+                "title": "Configurar router ZTE",
+                "description": "Introduce la información requerida para configurar la integración del router ZTE.",
+                "data": {
+                    "router_ip": "IP del router",
+                    "router_password": "Contraseña del router",
+                    "router_username": "Nombre de usuario del router (si aplica)",
+                    "ping_interval": "Intervalo de ping (segundos)",
+                    "sms_check_interval": "Intervalo de verificación de SMS (segundos)",
+                    "monthly_usage_threshold": "Límite mensual de datos (GB)",
+                    "phone_number": "Número de teléfono",
+                    "sms_message": "Mensaje SMS",
+                    "phone_number_1": "Número de teléfono 1",
+                    "message_1": "Mensaje 1",
+                    "phone_number_2": "Número de teléfono 2",
+                    "message_2": "Mensaje 2",
+                    "create_automation_sms": "Crear automatización de SMS",
+                    "create_automation_clean": "Crear automatización para limpiar memoria SMS",
+                    "create_automation_reboot": "Crear automatización de reinicio",
+                    "enable_flux_sensors": "Habilitar sensores FLUX - Solo nuevas versiones FW MC88x"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "No se pudo conectar con el router. Verifica la dirección IP e inténtalo de nuevo."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Configurar opciones del router ZTE",
+                "data": {
+                    "router_ip": "IP del router",
+                    "router_password": "Contraseña del router",
+                    "router_username": "Nombre de usuario del router (si aplica)",
+                    "ping_interval": "Intervalo de ping (segundos)",
+                    "sms_check_interval": "Intervalo de verificación de SMS (segundos)",
+                    "monthly_usage_threshold": "Límite mensual de datos (GB)",
+                    "phone_number": "Número de teléfono",
+                    "sms_message": "Mensaje SMS",
+                    "phone_number_1": "Número de teléfono 1",
+                    "message_1": "Mensaje 1",
+                    "phone_number_2": "Número de teléfono 2",
+                    "message_2": "Mensaje 2",
+                    "create_automation_sms": "Crear automatización de SMS",
+                    "create_automation_clean": "Crear automatización para limpiar memoria SMS",
+                    "create_automation_reboot": "Crear automatización de reinicio",
+                    "enable_flux_sensors": "Habilitar sensores FLUX - Solo nuevas versiones FW MC88x"
+                }
+            }
+        }
+    }
+}

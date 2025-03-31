@@ -1,0 +1,64 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Odaberite model rutera",
+                "description": "Odaberite svoj model ZTE rutera.",
+                "data": {
+                    "router_type": "Model rutera",
+                    "has_username": "Ruter koristi korisničko ime"
+                }
+            },
+            "config": {
+                "title": "Konfiguriraj ZTE Ruter",
+                "description": "Unesite potrebne informacije za postavljanje integracije ZTE rutera.",
+                "data": {
+                    "router_ip": "IP adresa rutera",
+                    "router_password": "Lozinka rutera",
+                    "router_username": "Korisničko ime rutera (ako je primjenjivo)",
+                    "ping_interval": "Interval pinga (sekunde)",
+                    "sms_check_interval": "Interval provjere SMS-a (sekunde)",
+                    "monthly_usage_threshold": "Mjesečni prag potrošnje (GB)",
+                    "phone_number": "Telefonski broj",
+                    "sms_message": "SMS poruka",
+                    "phone_number_1": "Telefonski broj 1",
+                    "message_1": "Poruka 1",
+                    "phone_number_2": "Telefonski broj 2",
+                    "message_2": "Poruka 2",
+                    "create_automation_sms": "Kreiraj SMS automatizaciju",
+                    "create_automation_clean": "Kreiraj automatizaciju čišćenja SMS memorije",
+                    "create_automation_reboot": "Kreiraj automatizaciju ponovnog pokretanja",
+                    "enable_flux_sensors": "Omogući FLUX senzore - samo nove FW MC88x verzije"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Neuspjelo povezivanje s ruterom. Provjerite IP adresu i pokušajte ponovo."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Postavke ZTE Rutera",
+                "data": {
+                    "router_ip": "IP adresa rutera",
+                    "router_password": "Lozinka rutera",
+                    "router_username": "Korisničko ime rutera (ako je primjenjivo)",
+                    "ping_interval": "Interval pinga (sekunde)",
+                    "sms_check_interval": "Interval provjere SMS-a (sekunde)",
+                    "monthly_usage_threshold": "Mjesečni prag potrošnje (GB)",
+                    "phone_number": "Telefonski broj",
+                    "sms_message": "SMS poruka",
+                    "phone_number_1": "Telefonski broj 1",
+                    "message_1": "Poruka 1",
+                    "phone_number_2": "Telefonski broj 2",
+                    "message_2": "Poruka 2",
+                    "create_automation_sms": "Kreiraj SMS automatizaciju",
+                    "create_automation_clean": "Kreiraj automatizaciju čišćenja SMS memorije",
+                    "create_automation_reboot": "Kreiraj automatizaciju ponovnog pokretanja",
+                    "enable_flux_sensors": "Omogući FLUX senzore - samo nove FW MC88x verzije"
+                }
+            }
+        }
+    }
+}
