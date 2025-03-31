@@ -849,7 +849,12 @@ class zteRouter:
                 logger.error(f"JSON decoding failed: {e}")
                 return ""
 
-            messages = response_json.get('messages', [])
+            # Ensure 'messages' exists and is a list
+            if 'messages' not in response_json or not isinstance(response_json['messages'], list):
+                logger.warning("'messages' key is missing or invalid in SMS response; defaulting to empty list.")
+                response_json['messages'] = []
+
+            messages = response_json['messages']
             logger.info(f"Fetched {len(messages)} SMS messages")
 
             decode_errors = 0
@@ -865,12 +870,29 @@ class zteRouter:
             if decode_errors:
                 logger.warning(f"{decode_errors} messages failed to decode cleanly.")
 
+            # Return dummy message if no SMS exists
+            if not messages:
+                dummy_message = {
+                    'id': '999',
+                    'number': 'DUMMY',
+                    'content': 'NO SMS IN MEMORY',
+                    'tag': '1',
+                    'date': datetime.now().strftime('%y,%m,%d,%H,%M,%S,+2'),
+                    'draft_group_id': '',
+                    'received_all_concat_sms': '1',
+                    'concat_sms_total': '0',
+                    'concat_sms_received': '0',
+                    'sms_class': '4'
+                }
+                response_json['messages'].append(dummy_message)
+
             logger.info("Parsed all SMS messages successfully")
             return json.dumps(response_json, indent=2)
 
         except Exception as e:
             logger.error(f"Failed to parse SMS: {e}")
             return ""
+
 
     def connect_data(self):
         logger.debug("Connecting to data network")
