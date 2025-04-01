@@ -18,6 +18,9 @@ import re
 import atexit  # <-- Added for auto cleanup
 from pygsm7 import encodeMessage, decodeMessage
 import traceback  # <-- add this at the top if not already
+from logging.handlers import TimedRotatingFileHandler
+import gzip
+import shutil
 
 # Disable warnings for insecure connections
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -25,25 +28,67 @@ log_certificate_details = False  # Set to True if you want to see certificate de
 # Configure the logger
 logger = logging.getLogger('homeassistant.components.zte_router')
 
+from logging.handlers import TimedRotatingFileHandler
+import gzip
+import shutil
+
 if __name__ == "__main__":
     # Configure logging when run directly
     logger.setLevel(logging.DEBUG)
 
-    # Common formatter
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    if not logger.handlers:
+        # Common formatter
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-    # Console handler (keeps existing behavior)
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
 
-    # File handler for mc.log in same directory as script
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    log_path = os.path.join(script_dir, "mc.log")
+        # File handler for mc.log in same directory as script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        log_path = os.path.join(script_dir, "mc.log")
 
-    file_handler = logging.FileHandler(log_path, mode='a')  # Append mode
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+        # Timed Rotating Handler: Rotate every 24h, keep 7 backups
+        rotating_handler = TimedRotatingFileHandler(
+            log_path,
+            when='midnight',
+            interval=1,
+            backupCount=7,
+            encoding='utf-8',
+            utc=False
+        )
+        rotating_handler.setFormatter(formatter)
+        rotating_handler.suffix = "%Y-%m-%d"
+
+        # Optional: Compress old logs after rotation
+        def compress_old_logs(handler):
+            log_dir = os.path.dirname(handler.baseFilename)
+            for filename in os.listdir(log_dir):
+                if filename.startswith("mc.log.") and not filename.endswith(".gz"):
+                    full_path = os.path.join(log_dir, filename)
+                    gz_path = full_path + ".gz"
+                    if not os.path.exists(gz_path):  # Only compress if not already
+                        with open(full_path, 'rb') as f_in, gzip.open(gz_path, 'wb') as f_out:
+                            shutil.copyfileobj(f_in, f_out)
+                        os.remove(full_path)
+                        logger.info(f"Compressed log file: {gz_path}")
+
+        # Hook into the handler’s rotation
+        def doRolloverAndCompress():
+            rotating_handler.doRollover()
+            compress_old_logs(rotating_handler)
+
+        # Optional override: copy on rotate + keep filename format
+        rotating_handler.rotator = lambda source, dest: shutil.copy2(source, dest)
+        rotating_handler.namer = lambda name: name
+
+        # Add the handler
+        logger.addHandler(rotating_handler)
+
+        # Optional: trigger rollover + compress manually at startup
+        # doRolloverAndCompress()
+
 
 else:
     # Suppress logging when imported
