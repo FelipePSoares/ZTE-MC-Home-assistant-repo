@@ -15,6 +15,7 @@ import socket
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 import re
+import atexit  # <-- Added for auto cleanup
 
 # Disable warnings for insecure connections
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -100,8 +101,26 @@ class zteRouter:
         self.try_set_protocol()
         self.referer = f"{self.protocol}://{self.ip}/"
     
+        # Register cleanup function
+        atexit.register(self.cleanup_files)
+
     SESSION_FILE = os.path.join("/tmp", "zte_session.json")
     CERT_FILE = "/tmp/zte_router_cert.pem"
+
+    def cleanup_files(self):
+        if os.path.exists(self.SESSION_FILE):
+            try:
+                with open(self.SESSION_FILE, 'r') as f:
+                    session_data = json.load(f)
+                    expiry = datetime.fromisoformat(session_data.get("session_expiry"))
+                    if datetime.now() > expiry:
+                        os.remove(self.SESSION_FILE)
+                        logger.info(f"Cleaned up expired session file: {self.SESSION_FILE}")
+                    else:
+                        logger.info("Session still valid, skipping cleanup.")
+            except Exception as e:
+                logger.warning(f"Failed to evaluate or clean session file: {e}")
+
     
     def save_session(self):
         session_data = {
@@ -112,7 +131,8 @@ class zteRouter:
         with open(self.SESSION_FILE, 'w') as f:
             json.dump(session_data, f)
         logger.info("Session saved to disk.")
-    
+        logger.debug(f"Saved session details: {json.dumps({'stok': self.stok, 'session_expiry': self.session_expiry.isoformat(), 'cookies': self.cookies}, indent=2)}")
+
     def load_session(self):
         if os.path.exists(self.SESSION_FILE):
             with open(self.SESSION_FILE, 'r') as f:
@@ -120,7 +140,12 @@ class zteRouter:
                 self.stok = session_data.get('stok')
                 self.cookies = session_data.get('cookies', {})
                 self.session_expiry = datetime.fromisoformat(session_data['session_expiry'])
+
                 logger.info("Session loaded from disk.")
+                logger.debug(f"Session file content: {json.dumps(session_data, indent=2)}")
+
+                remaining = self.session_expiry - datetime.now()
+                logger.info(f"Session expires in: {remaining.total_seconds() / 60:.2f} minutes")
         else:
             logger.info("No existing session file found.")
 
@@ -131,13 +156,6 @@ class zteRouter:
         logger.info("Invalidating session cookie")
         self.stok = None
         self.session_expiry = datetime.min
-        if os.path.exists(self.SESSION_FILE):
-            try:
-                os.remove(self.SESSION_FILE)
-                logger.info("Old session file deleted.")
-            except Exception as e:
-                logger.warning(f"Could not delete session file: {e}")
-
 
     def request_with_session(self, method, url, headers=None, body=None):
         if headers is None:
@@ -343,28 +361,13 @@ class zteRouter:
         logger.debug(f"Getting cookie for username: {username}, password: {password}, LD: {LD}")
 
         self.load_session()
-        if self.is_session_valid():
-            logger.info("Reusing existing session cookie – validating with router...")
-
-            # Perform a small harmless test call to ensure session is truly still valid
-            test_url = f"{self.referer}goform/goform_get_cmd_process?isTest=false&cmd=wa_inner_version"
-            header = {"Referer": self.referer}
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
-            try:
-                r = s.request("GET", test_url, headers=header)
-                if r.status == 200 and "wa_inner_version" in r.data.decode("utf-8"):
-                    logger.info("Router accepted existing session – continuing.")
-                    return self.stok
-                else:
-                    logger.warning("Router rejected session – will re-login.")
-            except Exception as e:
-                logger.warning(f"Session test failed, re-authenticating: {e}")
-
-        # If session was not valid or rejected
-        self.invalidate_session()
-        logger.info("Fetching new session from router")
+        if self.is_session_valid() and 'stok' in self.cookies:
+            remaining = self.session_expiry - datetime.now()
+            logger.info(f"🟢 Reusing session: stok={self.stok}")
+            logger.info(f"Session valid for another {remaining.total_seconds() / 60:.1f} minutes")
+            return self.stok
+        else:
+            logger.warning("🔄 Session not valid or missing 'stok' — performing fresh login")
 
         header = {"Referer": self.referer}
         cookie_header = self.build_cookie_header()
@@ -373,6 +376,7 @@ class zteRouter:
 
         hashPassword = self.hash(password).upper()
         ztePass = self.hash(hashPassword + LD).upper()
+
         AD = self.get_AD()
 
         if username:
@@ -407,7 +411,7 @@ class zteRouter:
                 raise ValueError("Failed to obtain a valid cookie from the router")
 
             # Set session expiry (e.g., valid for 60 minutes)
-            self.session_expiry = datetime.now() + timedelta(minutes=60)
+            self.session_expiry = datetime.now() + timedelta(minutes=1)
             self.stok = stok
             self.save_session()
             logger.info(f"Obtained new session cookie: stok={stok}")
@@ -416,7 +420,6 @@ class zteRouter:
         except Exception as e:
             logger.error(f"Failed to obtain cookie: {e}")
             raise
-
 
 
     def get_RD(self):
@@ -687,84 +690,61 @@ class zteRouter:
             logger.error(f"Failed to fetch comprehensive ZTE info: {e}")
             return ""
 
-    def zteinfo4(self, force_refresh=False, retry=1, delay=2):
+    def zteinfo4(self):
         """
-        Fetch and merge 'station_list' (WiFi) and 'lan_station_list' (LAN) from the ZTE router.
-        Tags each device with its connection type and returns a combined JSON string.
-
-        Args:
-            force_refresh (bool): If True, invalidates and renews the session before querying.
-            retry (int): Number of retries if data is empty.
-            delay (int): Delay between retries in seconds.
+        Fetch ZTE modem info for both 'station_list' (WiFi) and 'lan_station_list' (LAN),
+        tag each with type, and return a merged list under 'all_devices'.
 
         Returns:
-            str: JSON string of the combined result with 'station_list', 'lan_station_list', and 'all_devices'.
+            str: JSON string of the combined result, or empty string on error.
         """
         logger.debug("Fetching ZTE info: station_list and lan_station_list (tagged & merged)")
+        try:
+            LD = self.get_LD()
+            self.getCookie(username=self.username, password=self.password, LD=LD)
 
-        for attempt in range(retry + 1):
-            try:
-                # Optional session refresh
-                if force_refresh or attempt > 0:
-                    self.invalidate_session()
+            header = {
+                "Host": self.ip,
+                "Referer": f"{self.referer}index.html",
+            }
 
-                LD = self.get_LD()
-                self.getCookie(username=self.username, password=self.password, LD=LD)
+            cookie_header = self.build_cookie_header()
+            if cookie_header:
+                header['Cookie'] = cookie_header
 
-                header = {
-                    "Host": self.ip,
-                    "Referer": f"{self.referer}index.html",
-                }
-                cookie_header = self.build_cookie_header()
-                if cookie_header:
-                    header['Cookie'] = cookie_header
+            combined_data = {}
 
-                combined_data = {"station_list": [], "lan_station_list": [], "all_devices": []}
+            for param in ["station_list", "lan_station_list"]:
+                cmd_str = quote(param)
+                url = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&cmd={cmd_str}"
+                response = self.request_with_session('GET', url, headers=header)
+                raw_data = response.data.decode('utf-8')
 
-                for param in ["station_list", "lan_station_list"]:
-                    cmd_str = quote(param)
-                    url = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&cmd={cmd_str}"
-                    response = self.request_with_session('GET', url, headers=header)
-                    raw_data = response.data.decode('utf-8')
+                set_cookie_header = response.headers.get('Set-Cookie', '')
+                self.update_cookies(set_cookie_header)
 
-                    # Update cookies if available
-                    set_cookie_header = response.headers.get('Set-Cookie', '')
-                    self.update_cookies(set_cookie_header)
+                try:
+                    parsed = json.loads(raw_data)
 
-                    logger.debug(f"Raw response for {param}: {raw_data[:300]}...")
+                    # Tag each device with type: WiFi or LAN
+                    for item in parsed.get(param, []):
+                        item["type"] = "WiFi" if param == "station_list" else "LAN"
 
-                    try:
-                        parsed = json.loads(raw_data)
-                        device_list = parsed.get(param, [])
+                    combined_data[param] = parsed.get(param, [])
+                    logger.debug(f"Fetched {param} with {len(parsed.get(param, []))} entries")
+                except Exception as ex:
+                    logger.warning(f"Failed to parse {param}: {ex}")
+                    combined_data[param] = []
 
-                        # Tag each device
-                        for item in device_list:
-                            item["type"] = "WiFi" if param == "station_list" else "LAN"
+            # ✅ Merge all into one list
+            combined_data["all_devices"] = combined_data["station_list"] + combined_data["lan_station_list"]
+            logger.info(f"Fetched and merged {len(combined_data['all_devices'])} total devices")
 
-                        combined_data[param] = device_list
-                        logger.debug(f"Fetched {param} with {len(device_list)} entries")
-                    except Exception as ex:
-                        logger.warning(f"Failed to parse {param}: {ex}")
+            return json.dumps(combined_data)
 
-                # Merge both lists
-                combined_data["all_devices"] = combined_data["station_list"] + combined_data["lan_station_list"]
-                total = len(combined_data["all_devices"])
-                logger.info(f"Fetched and merged {total} total devices")
-
-                # Break retry loop if data is valid
-                if total > 0 or attempt == retry:
-                    return json.dumps(combined_data)
-
-                logger.warning(f"No devices found – retrying in {delay} seconds...")
-                time.sleep(delay)
-
-            except Exception as e:
-                logger.error(f"Failed to fetch ZTE device list: {e}")
-                if attempt == retry:
-                    return ""
-
-        return ""
-
+        except Exception as e:
+            logger.error(f"Failed to fetch ZTE info: {e}")
+            return ""
 
 
     def ztesmsinfo(self):
@@ -860,107 +840,87 @@ class zteRouter:
             logger.error(f"Failed to delete SMS: {e}")
             return None
 
-    def parsesms(self, force_refresh=False, retry=1, delay=2):
-        """
-        Fetch and decode all SMS messages stored on the router.
-
-        Args:
-            force_refresh (bool): If True, invalidate session before fetching.
-            retry (int): Number of retry attempts on failure or empty response.
-            delay (int): Delay between retries in seconds.
-
-        Returns:
-            str: JSON-formatted string of SMS messages.
-        """
+    def parsesms(self):
         logger.debug("Starting SMS parsing process")
+        try:
+            LD = self.get_LD()
+            self.getCookie(username=self.username, password=self.password, LD=LD)
 
-        for attempt in range(retry + 1):
+            header = {"Referer": self.referer}
+            cookie_header = self.build_cookie_header()
+            if cookie_header:
+                header['Cookie'] = cookie_header
+
+            payload = {
+                'cmd': 'sms_data_total',
+                'page': '0',
+                'data_per_page': '5000',
+                'mem_store': '1',
+                'tags': '10',
+                'order_by': 'order by id desc'
+            }
+
+            encoded_payload = urllib.parse.urlencode(payload)
+            url = self.referer + "goform/goform_get_cmd_process?" + encoded_payload
+
+            r = self.request_with_session('GET', url, headers=header)
+            response_text = r.data.decode('utf-8', errors='replace')
+
+            logger.debug(f"Raw SMS response: {repr(response_text[:300])}...")  # Preview first 300 chars
+
+            # Clean invalid characters
+            sanitized_text = clean_control_chars(response_text)
+            sanitized_text = sanitized_text.replace('HR�Telekom', 'HR Telekom')  # Specific fix
+
             try:
-                if force_refresh or attempt > 0:
-                    self.invalidate_session()
+                response_json = json.loads(sanitized_text)
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON decoding failed: {e}")
+                return ""
 
-                LD = self.get_LD()
-                self.getCookie(username=self.username, password=self.password, LD=LD)
+            # Ensure 'messages' exists and is a list
+            if 'messages' not in response_json or not isinstance(response_json['messages'], list):
+                logger.warning("'messages' key is missing or invalid in SMS response; defaulting to empty list.")
+                response_json['messages'] = []
 
-                header = {"Referer": self.referer}
-                cookie_header = self.build_cookie_header()
-                if cookie_header:
-                    header['Cookie'] = cookie_header
+            messages = response_json['messages']
+            logger.info(f"Fetched {len(messages)} SMS messages")
 
-                payload = {
-                    'cmd': 'sms_data_total',
-                    'page': '0',
-                    'data_per_page': '5000',
-                    'mem_store': '1',
-                    'tags': '10',
-                    'order_by': 'order by id desc'
-                }
-
-                url = self.referer + "goform/goform_get_cmd_process?" + urllib.parse.urlencode(payload)
-                r = self.request_with_session('GET', url, headers=header)
-                response_text = r.data.decode('utf-8', errors='replace')
-
-                logger.debug(f"Raw SMS response (truncated): {repr(response_text[:300])}...")
-
-                sanitized_text = clean_control_chars(response_text)
-                sanitized_text = sanitized_text.replace('HR�Telekom', 'HR Telekom')  # Custom fix
-
+            decode_errors = 0
+            for item in messages:
                 try:
-                    response_json = json.loads(sanitized_text)
-                except json.JSONDecodeError as e:
-                    logger.error(f"JSON decoding failed: {e}")
-                    if attempt == retry:
-                        return ""
-                    time.sleep(delay)
-                    continue
+                    original_content = item.get('content', '')
+                    decoded = hex2utf(original_content)
+                    item['content'] = decoded
+                except Exception as e:
+                    logger.warning(f"Failed to decode SMS content: {e}")
+                    decode_errors += 1
 
-                # Ensure 'messages' exists
-                if 'messages' not in response_json or not isinstance(response_json['messages'], list):
-                    logger.warning("'messages' key missing or invalid, defaulting to empty list.")
-                    response_json['messages'] = []
+            if decode_errors:
+                logger.warning(f"{decode_errors} messages failed to decode cleanly.")
 
-                messages = response_json['messages']
-                logger.info(f"Fetched {len(messages)} SMS messages")
+            # Return dummy message if no SMS exists
+            if not messages:
+                dummy_message = {
+                    'id': '999',
+                    'number': 'DUMMY',
+                    'content': 'NO SMS IN MEMORY',
+                    'tag': '1',
+                    'date': datetime.now().strftime('%y,%m,%d,%H,%M,%S,+2'),
+                    'draft_group_id': '',
+                    'received_all_concat_sms': '1',
+                    'concat_sms_total': '0',
+                    'concat_sms_received': '0',
+                    'sms_class': '4'
+                }
+                response_json['messages'].append(dummy_message)
 
-                decode_errors = 0
-                for item in messages:
-                    try:
-                        original_content = item.get('content', '')
-                        decoded = hex2utf(original_content)
-                        item['content'] = decoded
-                    except Exception as e:
-                        logger.warning(f"Failed to decode SMS content: {e}")
-                        decode_errors += 1
+            logger.info("Parsed all SMS messages successfully")
+            return json.dumps(response_json, indent=2)
 
-                if decode_errors:
-                    logger.warning(f"{decode_errors} messages failed to decode cleanly.")
-
-                # If no messages, insert dummy
-                if not messages:
-                    dummy_message = {
-                        'id': '999',
-                        'number': 'DUMMY',
-                        'content': 'NO SMS IN MEMORY',
-                        'tag': '1',
-                        'date': datetime.now().strftime('%y,%m,%d,%H,%M,%S,+2'),
-                        'draft_group_id': '',
-                        'received_all_concat_sms': '1',
-                        'concat_sms_total': '0',
-                        'concat_sms_received': '0',
-                        'sms_class': '4'
-                    }
-                    response_json['messages'].append(dummy_message)
-
-                logger.info("Parsed all SMS messages successfully")
-                return json.dumps(response_json, indent=2)
-
-            except Exception as e:
-                logger.error(f"Failed to parse SMS (attempt {attempt + 1}): {e}")
-                if attempt == retry:
-                    return ""
-                time.sleep(delay)
-
-        return ""
+        except Exception as e:
+            logger.error(f"Failed to parse SMS: {e}")
+            return ""
 
 
     def connect_data(self):
@@ -1117,7 +1077,7 @@ if __name__ == "__main__":
             result = zte.ztereboot()
             print(result)
         elif command == 5:
-            result = zte.parsesms(force_refresh=True, retry=3, delay=3)
+            result = zte.parsesms()
             if result:
                 data = json.loads(result)
                 ids = [msg['id'] for msg in data['messages']]
@@ -1130,7 +1090,7 @@ if __name__ == "__main__":
                     logger.info("No SMS in memory")
                     sys.exit(0)
         elif command == 6:
-            result = zte.parsesms(force_refresh=True, retry=3, delay=3)
+            result = zte.parsesms()
             if result:
                 test = json.loads(result)
                 if test["messages"]:
@@ -1185,7 +1145,7 @@ if __name__ == "__main__":
         elif command == 15:
             result = zte.setdata_mode("WL_AND_5G")
         elif command == 16:
-            result = zte.zteinfo4(force_refresh=True, retry=2, delay=3)
+            result = zte.zteinfo4()
             print(result)
         else:
             print(f"Invalid command: {command}")
