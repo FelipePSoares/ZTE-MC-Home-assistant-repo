@@ -37,14 +37,15 @@ jobs:
       id: create_release
       uses: actions/create-release@v1
       env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
+        GITHUB_TOKEN: ${{ secrets.PAT }}
       with:
-        tag_name: v${{ env.VERSION }}
+        tag_name: ${{ env.VERSION }}  # ← No 'v' prefix here
         release_name: ZTE_MC_HA_CI_v${{ env.VERSION }}
         body: |
-            Changes in this release:
-            - ${{ env.LAST_COMMIT_MESSAGE }}
-        prerelease: ${{ contains(env.VERSION, 'b') || contains(env.VERSION, 'beta') || contains(env.VERSION, 'rc') }}
+          Changes in this release:
+          - ${{ env.LAST_COMMIT_MESSAGE }}
+        prerelease: ${{ contains(env.VERSION, 'b') || contains(env.VERSION, 'beta') || contains(env.VERSION, 'rc') || contains(env.VERSION, 'alpha') }}
+      
       
 
     - name: Upload Release Asset

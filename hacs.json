@@ -1,5 +1,6 @@
 {
   "name": "ZTE Router",
   "render_readme": true,
-  "country": "HR"
+  "country": "HR",
+	"hide_default_branch": true
 }
