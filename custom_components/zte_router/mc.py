@@ -16,6 +16,8 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 import re
 import atexit  # <-- Added for auto cleanup
+from pygsm7 import encodeMessage, decodeMessage
+import traceback  # <-- add this at the top if not already
 
 # Disable warnings for insecure connections
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -47,32 +49,12 @@ else:
     # Suppress logging when imported
     logger.setLevel(logging.WARNING)
 
-gsm = ("@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\x1bÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?"
-       "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ`¿abcdefghijklmnopqrstuvwxyzäöñüà")
-ext = ("``````````````````^```````````````````{}`````\\````````````[~]`"
-       "|````````````````````````````````````€``````````````````````````")
-
 # Create a PoolManager instance to handle HTTP requests
 s = urllib3.PoolManager(cert_reqs='CERT_NONE')
 
 def get_sms_time():
     logger.debug("Generating SMS time")
     return datetime.now().strftime("%y;%m;%d;%H;%M;%S;+2")
-
-def gsm_encode(plaintext):
-    logger.debug(f"Encoding GSM message: {plaintext}")
-    res = bytearray()
-    for c in plaintext:
-        res.append(0)
-        idx = gsm.find(c)
-        if idx != -1:
-            res.append(idx)
-            continue
-        idx = ext.find(c)
-        if idx != -1:
-            res.append(27)
-            res.append(idx)
-    return binascii.hexlify(res)
 
 def clean_control_chars(s):
         """Remove control characters from a string (except newline and tab)."""
@@ -490,12 +472,15 @@ class zteRouter:
             logger.error(f"Failed to calculate AD: {e}")
             return ""
 
+
+
     def sendsms(self, phone_number, message):
         logger.debug(f"Sending SMS to {phone_number} with message: {message}")
         try:
             self.getCookie(username=self.username, password=self.password, LD=self.get_LD())
             AD = self.get_AD()
             header = {"Referer": self.referer}
+            
             # Build Cookie header
             cookie_header = self.build_cookie_header()
             if cookie_header:
@@ -503,7 +488,9 @@ class zteRouter:
 
             # Encode phone number and message
             phoneNumberEncoded = urllib.parse.quote(phone_number, safe="")
-            messageEncoded = gsm_encode(message).decode()
+            messageEncoded = encodeMessage(message)
+            
+            logger.debug(f"Encoded SMS (GSM 7-bit): {messageEncoded}")
 
             payload = {
                 'isTest': 'false',
@@ -517,17 +504,19 @@ class zteRouter:
                 'AD': AD
             }
 
-            # Prepare the encoded form data
             encoded_payload = urllib.parse.urlencode(payload)
             body = encoded_payload.encode('utf-8')
 
             r = self.request_with_session('POST', self.referer + "goform/goform_set_cmd_process", headers=header, body=body)
 
             logger.info(f"SMS sent with status code: {r.status}")
+            logger.debug(f"Router response: {r.data.decode(errors='replace')}")
             return r.status
         except Exception as e:
             logger.error(f"Failed to send SMS: {e}")
+            logger.debug(traceback.format_exc())
             return None
+
 
 
     def zteinfo(self):
