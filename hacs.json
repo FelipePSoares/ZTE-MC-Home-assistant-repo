@@ -1,5 +1,6 @@
 {
   "name": "ZTE Router",
   "render_readme": true,
-  "country": "HR"
+  "country": "HR",
+  "domain": "zte_router"
 }

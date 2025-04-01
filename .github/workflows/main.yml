@@ -35,15 +35,17 @@ jobs:
 
     - name: Create Release
       id: create_release
-      uses: actions/create-release@v1  # v1 uses Node16/Node20 automatically
+      uses: actions/create-release@v1
       env:
-        GITHUB_TOKEN: ${{ secrets.PAT }}
+          GITHUB_TOKEN: ${{ secrets.PAT }}
       with:
         tag_name: v${{ env.VERSION }}
         release_name: ZTE_MC_HA_CI_v${{ env.VERSION }}
         body: |
-          Changes in this release:
-          - ${{ env.LAST_COMMIT_MESSAGE }}
+            Changes in this release:
+            - ${{ env.LAST_COMMIT_MESSAGE }}
+        prerelease: ${{ contains(env.VERSION, 'b') || contains(env.VERSION, 'beta') || contains(env.VERSION, 'rc') }}
+      
 
     - name: Upload Release Asset
       id: upload-release-asset

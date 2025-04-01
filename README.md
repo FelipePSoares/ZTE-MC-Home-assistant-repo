@@ -18,6 +18,9 @@
 ![Codecov branch](https://img.shields.io/codecov/c/github/Kajkac/ZTE-MC-Home-assistant-repo/master?cacheSeconds=3600)
 ![installation_badge](https://img.shields.io/badge/dynamic/json?color=41BDF5&logo=home-assistant&label=integration%20usage&suffix=%20installs&cacheSeconds=15600&url=https://analytics.home-assistant.io/custom_integrations.json&query=$.zte_router.total)
 
+[![HACS Beta](https://img.shields.io/badge/HACS-Beta-blue.svg?style=for-the-badge&logo=home-assistant)](https://hacs.xyz/)
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge&logo=home-assistant)](https://github.com/hacs/integration)
+
 # ZTE Router Integration for Home Assistant
 Component to integrate some ZTE routers as a device tracker in Home Assistant. 
 This repository contains the ZTE Router custom integration and an add-on to deploy it in Home Assistant. The custom integration is located in the `custom_components/zte_router` directory.
