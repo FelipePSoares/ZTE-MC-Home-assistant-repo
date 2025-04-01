@@ -1,29 +1,41 @@
-![GitHub](https://img.shields.io/github/license/Kajkac/ZTE-MC-Home-assistant-repo?cacheSeconds=1)
-![GitHub Repo stars](https://img.shields.io/github/stars/Kajkac/ZTE-MC-Home-assistant-repo)
+# ZTE Router Integration for Home Assistant
+
 [![GitHub release](https://img.shields.io/github/release/Kajkac/ZTE-MC-Home-assistant-repo.svg)](https://github.com/Kajkac/ZTE-MC-Home-assistant-repo/releases/)
-[![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
+[![HACS Default](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/hacs/integration)
+[![HACS Beta](https://img.shields.io/badge/HACS-Beta-blue.svg)](https://hacs.xyz/)
+![GitHub License](https://img.shields.io/github/license/Kajkac/ZTE-MC-Home-assistant-repo)
+![GitHub Stars](https://img.shields.io/github/stars/Kajkac/ZTE-MC-Home-assistant-repo)
 
-![CodeQL](https://github.com/Kajkac/ZTE-MC-Home-assistant-repo/actions/workflows/codeql.yml/badge.svg?cacheSeconds=60)
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Kajkac/ZTE-MC-Home-assistant-repo/codeql.yml?branch=main&label=checks)](https://github.com/Kajkac/ZTE-MC-Home-assistant-repo/actions/workflows/codeql.yml)
-![Main Build](https://github.com/Kajkac/ZTE-MC-Home-assistant-repo/actions/workflows/main.yml/badge.svg?cacheSeconds=60)
-![Validate with hassfest](https://github.com/Kajkac/ZTE-MC-Home-assistant-repo/actions/workflows/hassfest.yml/badge.svg?cacheSeconds=60)
-![Validate with Hass Action](https://github.com/Kajkac/ZTE-MC-Home-assistant-repo/actions/workflows/validate.yml/badge.svg?cacheSeconds=60)
+![Validate with Hassfest](https://github.com/Kajkac/ZTE-MC-Home-assistant-repo/actions/workflows/hassfest.yml/badge.svg)
+![Validate with HACS](https://github.com/Kajkac/ZTE-MC-Home-assistant-repo/actions/workflows/validate.yml/badge.svg)
+![CodeQL](https://github.com/Kajkac/ZTE-MC-Home-assistant-repo/actions/workflows/codeql.yml/badge.svg)
+![Main Build](https://github.com/Kajkac/ZTE-MC-Home-assistant-repo/actions/workflows/main.yml/badge.svg)
 
-
-![GitHub contributors](https://img.shields.io/github/contributors/Kajkac/ZTE-MC-Home-assistant-repo)
+![Contributors](https://img.shields.io/github/contributors/Kajkac/ZTE-MC-Home-assistant-repo)
 ![Maintenance](https://img.shields.io/maintenance/yes/2025)
-![GitHub commit activity](https://img.shields.io/github/commit-activity/y/Kajkac/ZTE-MC-Home-assistant-repo)
-![GitHub commits since tagged version](https://img.shields.io/github/commits-since/juacas/zte_tracker/v1.0.0)
-![GitHub last commit](https://img.shields.io/github/last-commit/Kajkac/ZTE-MC-Home-assistant-repo)
-![Codecov branch](https://img.shields.io/codecov/c/github/Kajkac/ZTE-MC-Home-assistant-repo/master?cacheSeconds=3600)
-![installation_badge](https://img.shields.io/badge/dynamic/json?color=41BDF5&logo=home-assistant&label=integration%20usage&suffix=%20installs&cacheSeconds=15600&url=https://analytics.home-assistant.io/custom_integrations.json&query=$.zte_router.total)
-
-[![HACS Beta](https://img.shields.io/badge/HACS-Beta-blue.svg?style=for-the-badge&logo=home-assistant)](https://hacs.xyz/)
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge&logo=home-assistant)](https://github.com/hacs/integration)
+![Last Commit](https://img.shields.io/github/last-commit/Kajkac/ZTE-MC-Home-assistant-repo)
+![Commit Activity](https://img.shields.io/github/commit-activity/y/Kajkac/ZTE-MC-Home-assistant-repo)
+![Installation Count](https://img.shields.io/badge/dynamic/json?color=41BDF5&logo=home-assistant&label=integration%20usage&suffix=%20installs&cacheSeconds=15600&url=https://analytics.home-assistant.io/custom_integrations.json&query=$.zte_router.total)
 
 # ZTE Router Integration for Home Assistant
 Component to integrate some ZTE routers as a device tracker in Home Assistant. 
 This repository contains the ZTE Router custom integration and an add-on to deploy it in Home Assistant. The custom integration is located in the `custom_components/zte_router` directory.
+
+## 🚀 Overview
+
+This is a custom Home Assistant integration for several ZTE 5G routers. It adds full sensor tracking, diagnostics, and control over supported devices.
+
+### ✅ Features
+
+- Support for **MC801A, MC889, MC888, MC889A, MC888A**, and similar models with or without username
+- Automatically discovers devices and sensors
+- Wi-Fi and LAN client tracking
+- FLUX usage monitoring (TX/RX rates, data limit, usage alerts) - for newer versions of routers
+- SMS inbox access and diagnostics + sending predefined sms
+- Auto-config flow setup
+- Multiple sensor categories and diagnostic grouping
+
+> **Note:** This integration is in **beta**. It is stable enough for testing and general use, but expect some features to evolve.
 
 ## Installation
 ### Manual Installation
@@ -57,24 +69,27 @@ This repository contains the ZTE Router custom integration and an add-on to depl
 11. Select the model and enter the router's IP and password.
 12. Wait for the integration to install all the device sensors.
 
-###  Configuration
-Supported models:
-- MC801A
-- MC889
-- MC889A
-- MC888
-- MC888A
+## 🧪 Beta Features
 
-Models with Username should work now, and thats are non A models
+To install beta versions from HACS:
+
+1. In HACS → Integrations → ZTE Router → `⋮` → Redownload
+2. Toggle **"Show beta versions"** or Need a different version
+3. Select the latest `-b1` or `-beta.x` version
+4. Restart Home Assistant
+
 
 ![SCreenshot](https://raw.githubusercontent.com/Kajkac/ZTE-MC-Home-assistant-repo/main/zte.png)
 
-## Bugs: 
+## 🐞 Known Issues
 
-1. Errors in Home Assistant log - They are for now present until I polish the addon
-2. Various errors in sensors etc. - This integration is classified as beta right now but can be tested by anyone. 
-3. For suggestions, please open a new issue
-4. I will push new builds as soon I will have more time. Make sure you "star" this integration. 
+- Some sensors may occasionally show `unknown` until refreshed
+- SMS parsing may behave differently between router models
+- Occasional log errors (under investigation)
+- Errors in Home Assistant log - They are for now present until I polish the addon
+- Various errors in sensors etc. - This integration is classified as beta right now but can be tested by anyone. 
+- For suggestions, please open a new issue
+- I will push new builds as soon I will have more time. Make sure you "star" this integration. 
 
 ## Contributors
 If u have any suggestion, or you are doing pull requests and adding new features, increment the version number by 1 in manifest.json, so that GitHub automation automatically creates a new release.
