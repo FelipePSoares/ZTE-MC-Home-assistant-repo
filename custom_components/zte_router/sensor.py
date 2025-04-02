@@ -4,7 +4,6 @@ import logging
 import subprocess
 import asyncio
 from datetime import datetime, timedelta
-# ✅ Correct
 from homeassistant.helpers.entity_registry import async_get
 from homeassistant.helpers.entity import Entity, EntityCategory
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -192,7 +191,7 @@ class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         _LOGGER.info("Starting _async_update_data in DataUpdateCoordinator at %s", datetime.now())
         try:
-            await asyncio.sleep(4)  # Optional initial delay
+            #await asyncio.sleep(1)  # Optional initial delay
 
             # Fetch main data (command 7)
             main_data = await self.hass.async_add_executor_job(
@@ -203,7 +202,7 @@ class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
             self._data.update(json.loads(main_json))
 
             # Wait 3 seconds before next command
-            await asyncio.sleep(3)
+            await asyncio.sleep(1)
 
             # Fetch station and LAN clients (command 16)
             clients_data = await self.hass.async_add_executor_job(
