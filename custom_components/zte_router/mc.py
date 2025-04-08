@@ -22,6 +22,17 @@ from logging.handlers import TimedRotatingFileHandler
 import gzip
 import shutil
 
+session = {
+    "created": datetime.now().isoformat(),
+    "expires_in": "N/A",
+    "last_command": None,
+    "last_successful_cmd": None,
+    "last_error": None,
+    "total_requests": 0,
+    "last_latency_ms": 0,
+}
+
+
 # Disable warnings for insecure connections
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 log_certificate_details = False  # Set to True if you want to see certificate details in logs
@@ -153,12 +164,21 @@ class zteRouter:
         session_data = {
             'stok': self.stok,
             'session_expiry': self.session_expiry.isoformat(),
-            'cookies': self.cookies
+            'cookies': self.cookies,
+            # Persist full session state
+            'last_command': session.get("last_command"),
+            'last_successful_cmd': session.get("last_successful_cmd"),
+            'last_error': session.get("last_error"),
+            'total_requests': session.get("total_requests"),
+            'last_latency_ms': session.get("last_latency_ms"),
+            'session_created': session.get("created"),
+            'expires_in': session.get("expires_in"),
         }
         with open(self.SESSION_FILE, 'w') as f:
-            json.dump(session_data, f)
-        logger.info("Session saved to disk.")
-        logger.debug(f"Saved session details: {json.dumps({'stok': self.stok, 'session_expiry': self.session_expiry.isoformat(), 'cookies': self.cookies}, indent=2)}")
+            json.dump(session_data, f, indent=2)
+        logger.info("📝 Session saved to disk:")
+        logger.debug(json.dumps(session_data, indent=2))
+
 
     def load_session(self):
         if os.path.exists(self.SESSION_FILE):
@@ -168,13 +188,23 @@ class zteRouter:
                 self.cookies = session_data.get('cookies', {})
                 self.session_expiry = datetime.fromisoformat(session_data['session_expiry'])
 
-                logger.info("Session loaded from disk.")
-                logger.debug(f"Session file content: {json.dumps(session_data, indent=2)}")
+                # Restore extended session state
+                session["last_command"] = session_data.get("last_command")
+                session["last_successful_cmd"] = session_data.get("last_successful_cmd")
+                session["last_error"] = session_data.get("last_error")
+                session["total_requests"] = session_data.get("total_requests", 0)
+                session["last_latency_ms"] = session_data.get("last_latency_ms", 0)
+                session["created"] = session_data.get("session_created", datetime.now().isoformat())
+                session["expires_in"] = session_data.get("expires_in", "N/A")
+
+                logger.info("📦 Session loaded from disk:")
+                logger.debug(json.dumps(session_data, indent=2))
 
                 remaining = self.session_expiry - datetime.now()
-                logger.info(f"Session expires in: {remaining.total_seconds() / 60:.2f} minutes")
+                logger.info(f"⏳ Session expires in: {remaining.total_seconds() / 60:.2f} minutes")
         else:
-            logger.info("No existing session file found.")
+            logger.info("⚠️ No existing session file found.")
+
 
     def is_session_valid(self):
         return self.stok is not None and datetime.now() < self.session_expiry
@@ -191,27 +221,37 @@ class zteRouter:
         if cookie_header:
             headers['Cookie'] = cookie_header
 
+        start_time = time.perf_counter()
         response = s.request(method, url, headers=headers, body=body)
+        latency = int((time.perf_counter() - start_time) * 1000)
 
-        # Detect invalid session or router unavailability
         if response.status in [401, 403] or 'error' in response.data.decode('utf-8').lower():
             logger.warning(f"Session invalid detected (status {response.status}), re-logging in.")
             self.invalidate_session()
-            self.getCookie(self.username, self.password, self.get_LD())  # renew session
-            # Retry the request after re-login
+            self.getCookie(self.username, self.password, self.get_LD())
+
             cookie_header = self.build_cookie_header()
             if cookie_header:
                 headers['Cookie'] = cookie_header
+
+            # Start timer again for the retry
+            start_time = time.perf_counter()
             response = s.request(method, url, headers=headers, body=body)
+            latency = int((time.perf_counter() - start_time) * 1000)
+
         elif response.status in [502, 503, 504] or response.status >= 520:
-            logger.error(f"Router unavailable or not responding (status {response.status}). Please check router connectivity.")
-            raise ConnectionError(f"Router unavailable or not responding (status {response.status})")
+            logger.error(f"Router unavailable (status {response.status})")
+            raise ConnectionError(f"Router unavailable (status {response.status})")
+
+        # Log total requests and latency
+        session["total_requests"] += 1
+        session["last_latency_ms"] = latency
 
         # Update cookies after request
-        set_cookie_header = response.headers.get('Set-Cookie', '')
-        self.update_cookies(set_cookie_header)
+        self.update_cookies(response.headers.get('Set-Cookie', ''))
 
         return response
+
         
     def get_certificate_info(self, hostname, port=443):
         logger.debug(f"Checking for existing SSL certificate file: {self.CERT_FILE}")
@@ -392,6 +432,7 @@ class zteRouter:
             remaining = self.session_expiry - datetime.now()
             logger.info(f"🟢 Reusing session: stok={self.stok}")
             logger.info(f"Session valid for another {remaining.total_seconds() / 60:.1f} minutes")
+            session["expires_in"] = f"{int(remaining.total_seconds() / 60)} min"
             return self.stok
         else:
             logger.warning("🔄 Session not valid or missing 'stok' — performing fresh login")
@@ -439,6 +480,7 @@ class zteRouter:
 
             # Set session expiry (e.g., valid for 60 minutes)
             self.session_expiry = datetime.now() + timedelta(minutes=1)
+            session["expires_in"] = f"{int((self.session_expiry - datetime.now()).total_seconds() / 60)} min"
             self.stok = stok
             self.save_session()
             logger.info(f"Obtained new session cookie: stok={stok}")
@@ -619,8 +661,10 @@ class zteRouter:
             return ""
 
     def zteinfo3(self):
-        logger.debug("Fetching comprehensive ZTE info (zteinfo3) with hybrid splitting")
+        logger.debug("Fetching comprehensive ZTE info (zteinfo3) with hybrid splitting and fault tolerance")
+
         try:
+            # Step 1: Authenticate
             LD = self.get_LD()
             self.getCookie(username=self.username, password=self.password, LD=LD)
 
@@ -632,96 +676,108 @@ class zteRouter:
             if cookie_header:
                 header['Cookie'] = cookie_header
 
-                param_groups = {
-                    "system_info": (
-                        "wa_inner_version,cr_version,loginfo,new_version_state,current_upgrade_state,"
-                        "is_mandatory,modem_main_state,pin_status,signalbar,imei"
-                    ),
-                    "radio_network": (
-                        "network_type,network_provider,network_provider_fullname,rmcc,rmnc,mdm_mcc,mdm_mnc,"
-                        "rssi,ecio,ecio_1,ecio_2,ecio_3,ecio_4,rscp,rscp_1,rscp_2,rscp_3,rscp_4,lte_rsrp,"
-                        "lte_rsrp_1,lte_rsrp_2,lte_rsrp_3,lte_rsrp_4,lte_rsrq,lte_snr,lte_snr_1,lte_snr_2,lte_snr_3,lte_snr_4,"
-                        "lte_rssi,Z5g_rsrp,Z5g_rsrq,Z5g_snr,Z5g_SINR,Z5g_dlEarfcn,Z5g_CELL_ID,ZCELLINFO_band,"
-                        "enodeb_id,lte_pci,lte_pci_lock,lte_band,lte_ca_pcell_band,lte_ca_scell_band,lte_ca_scell_info,"
-                        "lte_multi_ca_scell_info,lte_multi_ca_scell_sig_info,lte_ca_scell_arfcn,lte_ca_scell_bandwidth,"
-                        "lte_ca_pcell_bandwidth,lte_ca_pcell_arfcn,lte_ca_pcell_freq,lte_earfcn_lock,nr5g_action_band,"
-                        "nr5g_action_channel,nr5g_action_nsa_band,nr5g_pci,nr5g_cell_id,nr_ca_pcell_band,nr_ca_pcell_freq,"
-                        "nr5g_nsa_band_lock,nr5g_sa_band_lock,nr_multi_ca_scell_info,wan_active_band,wan_active_channel,"
-                        "cell_id,tx_power,ngbr_cell_info,5g_rx0_rsrp,5g_rx1_rsrp"
-                    ),
-                    "connectivity": (
-                        "wan_ipaddr,wan_apn,wan_connect_status,wan_lte_ca,opms_wan_mode,opms_wan_auto_mode,"
-                        "ppp_status,pppoe_status,dial_mode,dhcp_wan_status,static_wan_status,static_wan_ipaddr,"
-                        "ip_passthrough_enabled,vpn_conn_status,ppp_dial_conn_fail_counter"
-                    ),
-                    "wifi": (
-                        "wifi_enable,wifi_onoff_state,wifi_5g_enable,wifi_chip_temp,wifi_dfs_status,ssid,EX_SSID1,EX_wifi_profile,"
-                        "m_ssid_enable,m_SSID2,wifi_chip1_ssid1_ssid,wifi_chip2_ssid1_ssid,wifi_chip1_ssid1_auth_mode,"
-                        "wifi_chip2_ssid1_auth_mode,wifi_chip1_ssid2_access_sta_num,wifi_chip2_ssid2_access_sta_num,"
-                        "wifi_chip1_ssid1_access_sta_num,wifi_chip2_ssid1_access_sta_num,wifi_chip1_ssid2_max_access_num,"
-                        "wifi_chip2_ssid2_max_access_num,wifi_chip1_ssid1_wifi_coverage,wifi_access_sta_num,sta_ip_status,"
-                        "guest_switch"
-                    ),
-                    "power_sensors": (
-                        "battery_value,battery_pers,battery_charging,battery_vol_percent,pm_modem_5g,pm_sensor_5g,"
-                        "pm_sensor_mdm,pm_sensor_ambient,pm_sensor_pa1"
-                    ),
-                    "misc": (
-                        "monthly_rx_bytes,monthly_tx_bytes,monthly_time,realtime_rx_bytes,realtime_tx_bytes,"
-                        "realtime_rx_thrpt,realtime_tx_thrpt,realtime_time,date_month,data_volume_limit_switch,"
-                        "data_volume_limit_size,data_volume_alert_percent,data_volume_limit_unit,roam_setting_option,"
-                        "upg_roam_switch,privacy_read_flag,is_night_mode,check_web_conflict,station_mac,lan_ipaddr,"
-                        "sms_received_flag,sms_unread_num,sts_received_flag,spn_name_data,spn_b1_flag,spn_b2_flag,"
-                        "simcard_roam,"
-                        "flux_realtime_tx_bytes,flux_realtime_rx_bytes,flux_realtime_time,"
-                        "flux_realtime_tx_thrpt,flux_realtime_rx_thrpt,"
-                        "flux_monthly_rx_bytes,flux_monthly_tx_bytes,flux_monthly_time,"
-                        "flux_data_volume_limit_size,flux_data_volume_alert_percent,flux_data_volume_limit_unit"
-                    ),
-                    "dns_config": (
-                        "dns_mode,prefer_dns_manual,standby_dns_manual"
-                    ),
-                    "unclassified": (
-                        "RadioOff,apn_interface_version,bandwidth"
-                    )
-                }
+            # Step 2: Parameter groups to fetch
+            param_groups = {
+                "system_info": (
+                    "wa_inner_version,cr_version,loginfo,new_version_state,current_upgrade_state,"
+                    "is_mandatory,modem_main_state,pin_status,signalbar,imei"
+                ),
+                "radio_network": (
+                    "network_type,network_provider,network_provider_fullname,rmcc,rmnc,mdm_mcc,mdm_mnc,"
+                    "rssi,ecio,ecio_1,ecio_2,ecio_3,ecio_4,rscp,rscp_1,rscp_2,rscp_3,rscp_4,lte_rsrp,"
+                    "lte_rsrp_1,lte_rsrp_2,lte_rsrp_3,lte_rsrp_4,lte_rsrq,lte_snr,lte_snr_1,lte_snr_2,lte_snr_3,lte_snr_4,"
+                    "lte_rssi,Z5g_rsrp,Z5g_rsrq,Z5g_snr,Z5g_SINR,Z5g_dlEarfcn,Z5g_CELL_ID,ZCELLINFO_band,"
+                    "enodeb_id,lte_pci,lte_pci_lock,lte_band,lte_ca_pcell_band,lte_ca_scell_band,lte_ca_scell_info,"
+                    "lte_multi_ca_scell_info,lte_multi_ca_scell_sig_info,lte_ca_scell_arfcn,lte_ca_scell_bandwidth,"
+                    "lte_ca_pcell_bandwidth,lte_ca_pcell_arfcn,lte_ca_pcell_freq,lte_earfcn_lock,nr5g_action_band,"
+                    "nr5g_action_channel,nr5g_action_nsa_band,nr5g_pci,nr5g_cell_id,nr_ca_pcell_band,nr_ca_pcell_freq,"
+                    "nr5g_nsa_band_lock,nr5g_sa_band_lock,nr_multi_ca_scell_info,wan_active_band,wan_active_channel,"
+                    "cell_id,tx_power,ngbr_cell_info,5g_rx0_rsrp,5g_rx1_rsrp"
+                ),
+                "connectivity": (
+                    "wan_ipaddr,wan_apn,wan_connect_status,wan_lte_ca,opms_wan_mode,opms_wan_auto_mode,"
+                    "ppp_status,pppoe_status,dial_mode,dhcp_wan_status,static_wan_status,static_wan_ipaddr,"
+                    "ip_passthrough_enabled,vpn_conn_status,ppp_dial_conn_fail_counter"
+                ),
+                "wifi": (
+                    "wifi_enable,wifi_onoff_state,wifi_5g_enable,wifi_chip_temp,wifi_dfs_status,ssid,EX_SSID1,EX_wifi_profile,"
+                    "m_ssid_enable,m_SSID2,wifi_chip1_ssid1_ssid,wifi_chip2_ssid1_ssid,wifi_chip1_ssid1_auth_mode,"
+                    "wifi_chip2_ssid1_auth_mode,wifi_chip1_ssid2_access_sta_num,wifi_chip2_ssid2_access_sta_num,"
+                    "wifi_chip1_ssid1_access_sta_num,wifi_chip2_ssid1_access_sta_num,wifi_chip1_ssid2_max_access_num,"
+                    "wifi_chip2_ssid2_max_access_num,wifi_chip1_ssid1_wifi_coverage,wifi_access_sta_num,sta_ip_status,"
+                    "guest_switch"
+                ),
+                "power_sensors": (
+                    "battery_value,battery_pers,battery_charging,battery_vol_percent,pm_modem_5g,pm_sensor_5g,"
+                    "pm_sensor_mdm,pm_sensor_ambient,pm_sensor_pa1"
+                ),
+                "misc": (
+                    "monthly_rx_bytes,monthly_tx_bytes,monthly_time,realtime_rx_bytes,realtime_tx_bytes,"
+                    "realtime_rx_thrpt,realtime_tx_thrpt,realtime_time,date_month,data_volume_limit_switch,"
+                    "data_volume_limit_size,data_volume_alert_percent,data_volume_limit_unit,roam_setting_option,"
+                    "upg_roam_switch,privacy_read_flag,is_night_mode,check_web_conflict,station_mac,lan_ipaddr,"
+                    "sms_received_flag,sms_unread_num,sts_received_flag,spn_name_data,spn_b1_flag,spn_b2_flag,"
+                    "simcard_roam,"
+                    "flux_realtime_tx_bytes,flux_realtime_rx_bytes,flux_realtime_time,"
+                    "flux_realtime_tx_thrpt,flux_realtime_rx_thrpt,"
+                    "flux_monthly_rx_bytes,flux_monthly_tx_bytes,flux_monthly_time,"
+                    "flux_data_volume_limit_size,flux_data_volume_alert_percent,flux_data_volume_limit_unit"
+                ),
+                "dns_config": (
+                    "dns_mode,prefer_dns_manual,standby_dns_manual"
+                ),
+                "unclassified": (
+                    "RadioOff,apn_interface_version,bandwidth"
+                )
+            }
 
-
+            # Step 3: Prepare for chunked requests
             combined_data = {}
+            failed_groups = {}
+            partial = False
             url_base = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&multi_data=1&cmd="
 
             for group_name, param_str in param_groups.items():
-                param_list = param_str.split(',')
-
-                max_params_per_request = 60
-                chunks = [
-                    param_list[i:i + max_params_per_request]
-                    for i in range(0, len(param_list), max_params_per_request)
-                ]
+                param_list = param_str.split(",")
+                chunks = [param_list[i:i + 60] for i in range(0, len(param_list), 60)]
 
                 for idx, chunk in enumerate(chunks):
                     cmd_encoded = quote(",".join(chunk))
                     url = url_base + cmd_encoded
+                    success = False
 
-                    response = self.request_with_session('GET', url, headers=header)
-                    raw_data = response.data.decode('utf-8')
+                    for attempt in range(3):  # max 3 retries
+                        try:
+                            response = self.request_with_session('GET', url, headers=header)
+                            raw_data = response.data.decode('utf-8')
+                            parsed = json.loads(raw_data)
+                            combined_data.update(parsed)
+                            logger.debug(f"✅ {group_name} (chunk {idx+1}) fetched with {len(parsed)} keys")
+                            success = True
+                            break
+                        except Exception as ex:
+                            logger.warning(f"⚠️ {group_name} (chunk {idx+1}) failed on attempt {attempt+1}: {ex}")
+                            time.sleep(1.5 * (attempt + 1))
 
-                    try:
-                        parsed = json.loads(raw_data)
-                        combined_data.update(parsed)
-                        logger.debug(f"Fetched {group_name} (chunk {idx+1}) with {len(parsed)} values")
-                    except Exception as ex:
-                        logger.warning(f"Failed to parse {group_name} (chunk {idx+1}): {ex}")
-                        continue
+                    if not success:
+                        failed_groups[f"{group_name}_chunk_{idx+1}"] = f"Failed after 3 attempts"
+                        partial = True
 
-                    set_cookie_header = response.headers.get('Set-Cookie', '')
-                    self.update_cookies(set_cookie_header)
+                    # Always update cookies
+                    if 'Set-Cookie' in response.headers:
+                        self.update_cookies(response.headers['Set-Cookie'])
 
-            logger.info("Fetched comprehensive ZTE info successfully using hybrid strategy")
+            # Step 4: Partial detection
+            if partial:
+                logger.warning(f"⚠️ zteinfo3: Partial data returned; failed chunks: {list(failed_groups.keys())}")
+                combined_data["__partial"] = True
+                combined_data["__errors__"] = failed_groups
+
+            logger.info("✅ Fetched ZTE info using hybrid strategy")
             return json.dumps(combined_data)
 
         except Exception as e:
-            logger.error(f"Failed to fetch comprehensive ZTE info: {e}")
+            logger.error(f"❌ Critical failure in zteinfo3: {e}")
             return ""
 
     def zteinfo4(self):
@@ -1056,6 +1112,8 @@ getsmstimeEncoded = urllib.parse.quote(getsmstime, safe="")
 #messageEncoded = gsm_encode(message)
 #outputmessage = messageEncoded.decode()
 
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 4:
         print("Usage: script.py ip password command [username] [phone_number] [message]")
@@ -1064,6 +1122,9 @@ if __name__ == "__main__":
     ip = sys.argv[1]
     password = sys.argv[2]
     command = int(sys.argv[3])
+        # Only track real command as last_command (not diagnostics)
+    if command != 99:
+        session["last_command"] = command
 
     # Initialize variables
     username = None
@@ -1181,9 +1242,33 @@ if __name__ == "__main__":
         elif command == 16:
             result = zte.zteinfo4()
             print(result)
-        else:
+        elif command == 99:
+            # ✅ Explicitly load session before printing diagnostics
+            zte.load_session()
+            diagnostics = {
+                "session_created": session.get("created"),
+                "session_expires_in": session.get("expires_in"),
+                "last_command": session.get("last_command", "Unknown"),
+                "last_successful_cmd": session.get("last_successful_cmd", "Unknown"),
+                "last_error": session.get("last_error", "Unknown"),
+                "total_requests": session.get("total_requests", 0),
+                "fetch_latency_ms": session.get("last_latency_ms", 0),
+            }
+            print(json.dumps(diagnostics, indent=2))
+            sys.exit(0)
+
+        # ✅ Track last successful command if applicable
+        if command != 99 and result is not None:
+            session["last_successful_cmd"] = command
+            zte.save_session()  # 💾 Save updated session to disk!
+
+        # ❌ Fallback if command is not recognized
+        if result is None:
             print(f"Invalid command: {command}")
             sys.exit(1)
 
     except Exception as e:
         logger.error(f"An error occurred: {e}")
+        session["last_error"] = str(e)
+        zte.save_session()
+        sys.exit(1)
