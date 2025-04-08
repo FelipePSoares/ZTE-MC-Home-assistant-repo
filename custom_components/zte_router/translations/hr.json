@@ -28,7 +28,8 @@
                     "create_automation_sms": "Kreiraj SMS automatizaciju",
                     "create_automation_clean": "Kreiraj automatizaciju čišćenja SMS memorije",
                     "create_automation_reboot": "Kreiraj automatizaciju ponovnog pokretanja",
-                    "enable_flux_sensors": "Omogući FLUX senzore - samo nove FW MC88x verzije"
+                    "enable_flux_sensors": "Omogući FLUX senzore - samo nove FW MC88x verzije",
+                    "allow_stale_data": "Dozvoli zadnje vrijednosti senzora (koristi zadnje podatke ako je ruter nedostupan)"
                 }
             }
         },
@@ -56,7 +57,8 @@
                     "create_automation_sms": "Kreiraj SMS automatizaciju",
                     "create_automation_clean": "Kreiraj automatizaciju čišćenja SMS memorije",
                     "create_automation_reboot": "Kreiraj automatizaciju ponovnog pokretanja",
-                    "enable_flux_sensors": "Omogući FLUX senzore - samo nove FW MC88x verzije"
+                    "enable_flux_sensors": "Omogući FLUX senzore - samo nove FW MC88x verzije",
+                    "allow_stale_data": "Dozvoli zadnje vrijednosti senzora (koristi zadnje podatke ako je ruter nedostupan)"
                 }
             }
         }

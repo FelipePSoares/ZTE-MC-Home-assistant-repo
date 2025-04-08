@@ -5,7 +5,8 @@
                 "title": "Select Router Model",
                 "description": "Please select your router model.",
                 "data": {
-                    "router_type": "Router Model"
+                    "router_type": "Router Model",
+                    "has_username": "Requires Username ? (if yes enable)"
                 }
             },
             "config": {
@@ -27,7 +28,8 @@
                     "create_automation_sms": "Create SMS Automation",
                     "create_automation_clean": "Create Clean SMS Memory Automation",
                     "create_automation_reboot": "Create Reboot Automation",
-                    "enable_flux_sensors": "Enable FLUX sensors - Only new FW MC88x editions"
+                    "enable_flux_sensors": "Enable FLUX sensors - Only new FW MC88x editions",
+                    "allow_stale_data": "Allow last values of sensors (use stale data if router is unreachable)"
                 }
             }
         },
@@ -55,7 +57,8 @@
                     "create_automation_sms": "Create SMS Automation",
                     "create_automation_clean": "Create Clean SMS Memory Automation",
                     "create_automation_reboot": "Create Reboot Automation",
-                    "enable_flux_sensors": "Enable FLUX sensors - Only new FW MC88x editions"
+                    "enable_flux_sensors": "Enable FLUX sensors - Only new FW MC88x editions",
+                    "allow_stale_data": "Allow last values of sensors (use stale data if router is unreachable)"
                 }
             }
         }

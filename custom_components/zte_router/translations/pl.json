@@ -28,7 +28,8 @@
                     "create_automation_sms": "Utwórz automatyzację SMS",
                     "create_automation_clean": "Utwórz automatyzację czyszczenia pamięci SMS",
                     "create_automation_reboot": "Utwórz automatyzację restartu",
-                    "enable_flux_sensors": "Włącz czujniki FLUX – tylko nowe wersje FW MC88x"
+                    "enable_flux_sensors": "Włącz czujniki FLUX – tylko nowe wersje FW MC88x",
+                    "allow_stale_data": "Zezwól na ostatnie wartości czujników (użyj starych danych, jeśli router jest niedostępny)"
                 }
             }
         },
@@ -56,7 +57,8 @@
                     "create_automation_sms": "Utwórz automatyzację SMS",
                     "create_automation_clean": "Utwórz automatyzację czyszczenia pamięci SMS",
                     "create_automation_reboot": "Utwórz automatyzację restartu",
-                    "enable_flux_sensors": "Włącz czujniki FLUX – tylko nowe wersje FW MC88x"
+                    "enable_flux_sensors": "Włącz czujniki FLUX – tylko nowe wersje FW MC88x",
+                    "allow_stale_data": "Zezwól na ostatnie wartości czujników (użyj starych danych, jeśli router jest niedostępny)"
                 }
             }
         }

@@ -5,7 +5,8 @@
                 "title": "Routermodell auswählen",
                 "description": "Bitte wählen Sie Ihr Routermodell aus.",
                 "data": {
-                    "router_type": "Routermodell"
+                    "router_type": "Routermodell",
+                    "has_username": "Benötigt Benutzernamen? (falls ja, aktivieren)"
                 }
             },
             "config": {
@@ -27,7 +28,8 @@
                     "create_automation_sms": "SMS-Automatisierung erstellen",
                     "create_automation_clean": "Automatisches Löschen des SMS-Speichers erstellen",
                     "create_automation_reboot": "Neustart-Automatisierung erstellen",
-                    "enable_flux_sensors": "FLUX sensors - Nur neue FW MC88x-Editionen"
+                    "enable_flux_sensors": "FLUX sensors - Nur neue FW MC88x-Editionen",
+                    "allow_stale_data": "Letzte Sensorwerte zulassen (veraltete Daten verwenden, wenn der Router nicht erreichbar ist)"
                 }
             }
         },
@@ -55,7 +57,8 @@
                     "create_automation_sms": "SMS-Automatisierung erstellen",
                     "create_automation_clean": "Automatisches Löschen des SMS-Speichers erstellen",
                     "create_automation_reboot": "Neustart-Automatisierung erstellen",
-                    "enable_flux_sensors": "FLUX sensors - Nur neue FW MC88x-Editionen"
+                    "enable_flux_sensors": "FLUX sensors - Nur neue FW MC88x-Editionen",
+                    "allow_stale_data": "Letzte Sensorwerte zulassen (veraltete Daten verwenden, wenn der Router nicht erreichbar ist)"
                 }
             }
         }

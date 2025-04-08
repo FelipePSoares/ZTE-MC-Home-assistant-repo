@@ -14,239 +14,152 @@ from homeassistant.exceptions import PlatformNotReady
 from .const import (
     DOMAIN, SENSOR_NAMES, MANUFACTURER, MODEL, UNITS,
     DISABLED_SENSORS_MC889, DISABLED_SENSORS_MC888, DISABLED_SENSORS_MC801A,
-    DIAGNOSTICS_SENSORS,FLUX_KEYS, FLUX_ICON_MAP
-
+    DIAGNOSTICS_SENSORS,FLUX_KEYS, FLUX_ICON_MAP,CONF_ALLOW_STALE_DATA, DEFAULT_ALLOW_STALE_DATA
 )
-
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
-    ip_entry = entry.data["router_ip"]
-    password_entry = entry.data["router_password"]
-    username_entry = entry.data.get("router_username") if entry.data.get("router_type") in ["MC888A", "MC889A"] else None
+    ip = entry.data["router_ip"]
+    pwd = entry.data["router_password"]
+    user = entry.data.get("router_username", "")
+    router_type = entry.data.get("router_type", "MC801A")
     ping_interval = entry.data.get("ping_interval", 60)
     sms_check_interval = entry.data.get("sms_check_interval", 100)
-    router_type = entry.data.get("router_type", "MC801A")
     config = {**entry.data, **entry.options}
     enable_flux = config.get("enable_flux_sensors", True)
+    allow_stale_data = config.get("allow_stale_data", DEFAULT_ALLOW_STALE_DATA)
 
+    # Device-specific disabled sensors
+    disabled_sensors = {
+        "MC889": DISABLED_SENSORS_MC889,
+        "MC888": DISABLED_SENSORS_MC888
+    }.get(router_type, DISABLED_SENSORS_MC801A)
 
+    # Start coordinator
+    coordinator = ZTERouterDataUpdateCoordinator(
+        hass, config["router_ip"], config["router_password"],
+        user, ping_interval, allow_stale_data
+    )
+    await coordinator.async_config_entry_first_refresh()
 
-    _LOGGER.info(f"Router type selected: {router_type}")
-    _LOGGER.info(f"Ping interval: {ping_interval} seconds")
-    _LOGGER.info(f"SMS check interval: {sms_check_interval} seconds")
-
-    if router_type == "MC889":
-        disabled_sensors = DISABLED_SENSORS_MC889
-    elif router_type == "MC888":
-        disabled_sensors = DISABLED_SENSORS_MC888
-    else:
-        disabled_sensors = DISABLED_SENSORS_MC801A
-
-    coordinator = ZTERouterDataUpdateCoordinator(hass, ip_entry, password_entry, username_entry, ping_interval)
-    sms_coordinator = ZTERouterSMSUpdateCoordinator(hass, ip_entry, password_entry, username_entry, sms_check_interval)
-
-    await coordinator.async_refresh()
-    await sms_coordinator.async_refresh()
-
-    if not coordinator.last_update_success or not sms_coordinator.last_update_success:
-        _LOGGER.error("Coordinator(s) failed to refresh successfully.")
+    if not coordinator.last_update_success:
         raise PlatformNotReady
 
     sensors = []
     handled_keys = set()
 
-    # Command 3 (dynamic data)
-    dynamic_data = await hass.async_add_executor_job(
-        coordinator.run_mc_script, ip_entry, password_entry, username_entry, 3
-    )
-    _LOGGER.debug(f"Data for command 3: {dynamic_data}")
-    try:
-        dynamic_data_json = extract_json(dynamic_data)
-        dynamic_data = json.loads(dynamic_data_json)
-    except json.JSONDecodeError as e:
-        _LOGGER.error(f"Failed to parse JSON data for command 3: {e}")
-        dynamic_data = {}
-    coordinator._data.update(dynamic_data)
+    # Core Sensors
+    sensors.extend([
+        ConnectedBandsSensor(coordinator, disabled_sensors.get("connected_bands", False)),
+        WiFiClientsSensor(coordinator),
+        LANClientsSensor(coordinator),
+        ConnectedDevicesSensor(coordinator),
+        MonthlyUsageSensor(coordinator),
+        monthly_tx_gb(coordinator),
+        monthly_rx_gb(coordinator),
+        DataLeftSensor(coordinator),
+        ConnectionUptimeSensor(coordinator),
+        ZTESessionDiagnosticsSensor(coordinator),
+    ])
+    handled_keys.update([
+        "station_list", "lan_station_list", "all_devices"
+    ])
 
-    # Command 6 (SMS data)
-    additional_data = await hass.async_add_executor_job(
-        coordinator.run_mc_script, ip_entry, password_entry, username_entry, 6
-    )
-    _LOGGER.debug(f"Data for command 6: {additional_data}")
-    try:
-        additional_data_json = extract_json(additional_data)
-        additional_data = json.loads(additional_data_json)
-    except json.JSONDecodeError as e:
-        _LOGGER.error(f"Failed to parse JSON data for command 6: {e}")
-        additional_data = {}
-    coordinator._data.update(additional_data)
+    # SMS Sensor
+    sms_data = coordinator.data.get("sms_data", {})
+    if "content" in sms_data:
+        sensors.append(LastSMSSensor(coordinator, sms_data, disabled_sensors.get("last_sms", False)))
 
-    # Add Last SMS sensor
-    if "content" in additional_data:
-        sensors.append(LastSMSSensor(sms_coordinator, additional_data, disabled_sensors.get("last_sms", False)))
-
-    # Core custom sensors
-    sensors.append(ConnectedBandsSensor(coordinator, disabled_sensors.get("connected_bands", False)))
-    sensors.append(WiFiClientsSensor(coordinator))
-    sensors.append(LANClientsSensor(coordinator))
-    sensors.append(MonthlyUsageSensor(coordinator))
-    sensors.append(monthly_tx_gb(coordinator))
-    sensors.append(monthly_rx_gb(coordinator))
-    sensors.append(DataLeftSensor(coordinator))
-    sensors.append(ConnectionUptimeSensor(coordinator))
-    sensors.append(ZTESessionDiagnosticsSensor(coordinator))
-
-    # Command 16 (station list)
-    station_list_data = await hass.async_add_executor_job(
-        coordinator.run_mc_script, ip_entry, password_entry, username_entry, 16
-    )
-    _LOGGER.debug(f"Station list raw output: {station_list_data}")
-    try:
-        station_list_json = extract_json(station_list_data)
-        station_list_parsed = json.loads(station_list_json)
-    except json.JSONDecodeError as e:
-        _LOGGER.error(f"Failed to parse JSON data for command 16 (station_list): {e}")
-        station_list_parsed = {}
-    coordinator._data.update(station_list_parsed)
-    sensors.append(ConnectedDevicesSensor(coordinator, disabled_by_default=False))
-    
-    # Prevent fallback from creating sensors for list-type data
-    handled_keys.update(["station_list", "lan_station_list", "all_devices"])
-
-# --- FLUX sensors ---
+    # FLUX Sensors
     registry = async_get(hass)
-
     if enable_flux:
-        _LOGGER.info("FLUX sensors are enabled. Adding sensors.")
         for key in FLUX_KEYS:
             if key not in handled_keys:
                 if key in {"flux_total_usage", "flux_monthly_usage"}:
                     if "flux_total_usage" not in handled_keys:
-                        _LOGGER.debug(f"[FLUX] Registering FLUX Total Usage Sensor: {key}")
                         sensors.append(ZTEFluxTotalUsageSensor(coordinator))
                         handled_keys.add("flux_total_usage")
                 else:
-                    _LOGGER.debug(f"[FLUX] Registering FLUX sensor: {key}")
                     sensors.append(ZTEFluxSensor(coordinator, key))
                     handled_keys.add(key)
     else:
-        _LOGGER.info("FLUX sensors are disabled by user config. Removing FLUX sensors from registry.")
-
-        entity_ids = list(registry.entities.keys())  # Avoid modifying during iteration
-
+        # Clean up previously created FLUX sensors if they're now disabled
+        entity_ids = list(registry.entities.keys())
         for key in FLUX_KEYS:
-            unique_id = f"{DOMAIN}_{ip_entry}_stat_{key}"
-            for entity_id in entity_ids:
-                entry = registry.entities.get(entity_id)
-                if entry and entry.domain == "sensor" and entry.unique_id == unique_id:
-                    _LOGGER.info(f"[FLUX] Removing sensor entity: {entity_id}")
-                    registry.async_remove(entity_id)
+            unique_id = f"{DOMAIN}_{ip}_stat_{key}"
+            for eid in entity_ids:
+                entity = registry.entities.get(eid)
+                if entity and entity.unique_id == unique_id:
+                    registry.async_remove(eid)
 
-    # --- Selected other formatted sensors ---
-    formatted_keys = {"connection_uptime"}
-    if not enable_flux:
-        formatted_keys.add("date_month")
+    # Filter out specific internal diagnostic keys from becoming sensors
+    diagnostic_keys_to_skip = {
+        "session_created", "session_expires_in", "last_command",
+        "last_successful_cmd", "last_error", "total_requests", "fetch_latency_ms"
+    }
 
-    # --- Fallback: all others as basic sensors ---
-    _LOGGER.debug(f"Remaining unhandled keys: {[k for k in coordinator.data.keys() if k not in handled_keys]}")
-    for key in coordinator.data.keys():
-        if key in handled_keys or key in FLUX_KEYS:
+    # Fallback for unhandled keys — add remaining sensors
+    for key, value in coordinator.data.items():
+        if (
+            key in handled_keys or
+            key in FLUX_KEYS or
+            key in diagnostic_keys_to_skip or
+            isinstance(value, dict)
+        ):
             continue
+
         name = SENSOR_NAMES.get(key, key)
         sensors.append(ZTERouterSensor(coordinator, name, key, disabled_sensors.get(key, False)))
         handled_keys.add(key)
 
-
-    _LOGGER.info(f"Sensors added: {[sensor.name for sensor in sensors]}")
-    _LOGGER.info(f"Diagnostics sensors: {[sensor.name for sensor in sensors if sensor.is_diagnostics]}")
-
     async_add_entities(sensors, True)
 
+
 def extract_json(output):
-    """Extract the JSON data from the output."""
     try:
-        _LOGGER.debug(f"Raw output before JSON extraction: {output}")
-        json_data = output[output.index('{'):output.rindex('}')+1]
-        return json_data
-    except ValueError as e:
-        _LOGGER.error(f"Failed to extract JSON: {e}")
-        _LOGGER.debug(f"Raw output that caused the error: {output}")
+        return output[output.index('{'):output.rindex('}')+1]
+    except ValueError:
         return "{}"
 
-
 class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, ip_entry, password_entry, username_entry, ping_interval):
-        self.ip_entry = ip_entry
-        self.password_entry = password_entry
-        self.username_entry = username_entry if username_entry else ""
+    def __init__(self, hass, ip, pwd, user, interval, allow_stale_data=True):
+        self.ip_entry = ip
+        self.password_entry = pwd
+        self.username_entry = user
         self._data = {}
-        _LOGGER.info(f"Initializing DataUpdateCoordinator with ping interval: {ping_interval} seconds")
+        self.allow_stale_data = allow_stale_data
         super().__init__(
-            hass,
-            _LOGGER,
-            name="zte_router",
-            update_interval=timedelta(seconds=ping_interval),  # Use ping_interval
+            hass, _LOGGER, name="zte_router", update_interval=timedelta(seconds=interval)
         )
 
     async def _async_update_data(self):
-        _LOGGER.info("Starting _async_update_data in DataUpdateCoordinator at %s", datetime.now())
         try:
-            #await asyncio.sleep(1)  # Optional initial delay
-
-            # Fetch main data (command 7)
-            main_data = await self.hass.async_add_executor_job(
-                self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, 7
-            )
-            _LOGGER.debug(f"Data received from command 7: {main_data}")
-            main_json = extract_json(main_data)
-            self._data.update(json.loads(main_json))
-
-            # Wait 3 seconds before next command
-            await asyncio.sleep(1)
-
-            # Fetch station and LAN clients (command 16)
-            clients_data = await self.hass.async_add_executor_job(
-                self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, 16
-            )
-            _LOGGER.debug(f"Data received from command 16: {clients_data}")
-            clients_json = extract_json(clients_data)
-            self._data.update(json.loads(clients_json))
-
+            keys = {3: "dynamic_data", 6: "sms_data", 7: "status_data", 16: "client_data", 99: "diag_data"}
+            for cmd, label in keys.items():
+                raw = await self.hass.async_add_executor_job(self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, cmd)
+                self._data[label] = json.loads(extract_json(raw))
+                self._data.update(self._data[label])
             return self._data
-
         except Exception as err:
-            _LOGGER.error(f"Error during _async_update_data: {err}")
-            return self._data
+            _LOGGER.error(f"Update failed: {err}")
+            if not self.allow_stale_data:
+                raise UpdateFailed(f"Router update failed: {err}")
+            return self._data  # fallback to old data if allowed
 
-
-    def run_mc_script(self, ip, password, username, command, retries=3, delay=2):
+    def run_mc_script(self, ip, pwd, user, cmd, retries=3, delay=2):
         attempt = 0
         while attempt < retries:
-            _LOGGER.info(f"Running mc.py script for command {command}, attempt {attempt + 1}")
             try:
-                # Ensure username is a string; use an empty string if None
-                username = username or ""
-                cmd = [
-                    "python3",
-                    "/config/custom_components/zte_router/mc.py",
-                    ip,
-                    password,
-                    str(command),
-                    username  # Include username if applicable
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-                _LOGGER.debug(f"Output for command {command}: {result.stdout}")
+                cmdline = ["python3", "/config/custom_components/zte_router/mc.py", str(ip), str(pwd), str(cmd), str(user or "")]
+                result = subprocess.run(cmdline, capture_output=True, text=True, check=True)
                 return result.stdout
             except subprocess.CalledProcessError as e:
-                _LOGGER.warning(f"Attempt {attempt + 1} failed with error: {e}. Retrying in {delay} seconds...")
                 attempt += 1
                 if attempt < retries:
                     time.sleep(delay)
-                    delay *= 2  # Double the delay time for the next retry
+                    delay *= 2
                 else:
-                    _LOGGER.error(f"All {retries} attempts failed for command {command}. Raising error.")
-                    raise
+                    raise e
 
 class ZTERouterSMSUpdateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass, ip_entry, password_entry, username_entry, sms_check_interval):
@@ -314,6 +227,19 @@ class ZTERouterEntity(RestoreEntity, Entity):
         ))
         await self.async_handle_coordinator_update()
 
+    @property
+    def is_diagnostics(self) -> bool:
+        return getattr(self, "_attr_is_diagnostics", False)
+
+    @property
+    def entity_category(self):
+        return EntityCategory.DIAGNOSTIC if self.is_diagnostics else None
+
+    @property
+    def extra_state_attributes(self):
+        # Only return attributes if self._attributes is defined
+        return getattr(self, "_attributes", {})
+
 class ZTESessionDiagnosticsSensor(ZTERouterEntity):
     def __init__(self, coordinator):
         self.coordinator = coordinator
@@ -323,6 +249,7 @@ class ZTESessionDiagnosticsSensor(ZTERouterEntity):
         self.entity_registry_enabled_default = True
         self._attr_is_diagnostics = True
         self._attr_should_poll = False
+        self._state = "Unavailable" if not self.coordinator.last_update_success else "OK"
         _LOGGER.info("Initializing Session Diagnostics sensor")
 
     @property
@@ -419,8 +346,7 @@ class ZTERouterSensor(ZTERouterEntity):
 
     @property
     def available(self):
-        """Return True if the entity is available."""
-        return True
+        return self.coordinator.last_update_success or self.coordinator.allow_stale_data
 
     @property
     def unit_of_measurement(self):
@@ -540,8 +466,7 @@ class LastSMSSensor(ZTERouterEntity):
 
     @property
     def available(self):
-        """Return True if the entity is available."""
-        return True
+        return self.coordinator.last_update_success or self.coordinator.allow_stale_data
 
     @property
     def extra_state_attributes(self):
@@ -675,8 +600,7 @@ class ConnectedBandsSensor(ZTERouterEntity):
 
     @property
     def available(self):
-        """Return True if the entity is available."""
-        return True
+        return self.coordinator.last_update_success or self.coordinator.allow_stale_data
 
     @property
     def extra_state_attributes(self):
@@ -765,8 +689,7 @@ class MonthlyUsageSensor(ZTERouterEntity):
 
     @property
     def available(self):
-        """Return True if the entity is available."""
-        return True
+        return self.coordinator.last_update_success or self.coordinator.allow_stale_data
 
     @property
     def unit_of_measurement(self):
@@ -831,8 +754,7 @@ class monthly_tx_gb(ZTERouterEntity):
 
     @property
     def available(self):
-        """Return True if the entity is available."""
-        return True
+        return self.coordinator.last_update_success or self.coordinator.allow_stale_data
 
     @property
     def unit_of_measurement(self):
@@ -896,8 +818,7 @@ class monthly_rx_gb(ZTERouterEntity):
 
     @property
     def available(self):
-        """Return True if the entity is available."""
-        return True
+        return self.coordinator.last_update_success or self.coordinator.allow_stale_data
 
     @property
     def unit_of_measurement(self):
@@ -961,8 +882,7 @@ class DataLeftSensor(ZTERouterEntity):
 
     @property
     def available(self):
-        """Return True if the entity is available."""
-        return True
+        return self.coordinator.last_update_success or self.coordinator.allow_stale_data
 
     @property
     def unit_of_measurement(self):
@@ -1026,8 +946,7 @@ class ConnectionUptimeSensor(ZTERouterEntity):
 
     @property
     def available(self):
-        """Return True if the entity is available."""
-        return True
+        return self.coordinator.last_update_success or self.coordinator.allow_stale_data
 
     @property
     def unit_of_measurement(self):
@@ -1090,7 +1009,7 @@ class ConnectedDevicesSensor(ZTERouterEntity):
 
     @property
     def available(self):
-        return True
+        return self.coordinator.last_update_success or self.coordinator.allow_stale_data
 
     @property
     def extra_state_attributes(self):

@@ -5,6 +5,9 @@ DEFAULT_USERNAME = "admin"
 DEVICE_NAME = "ZTE MC Series"
 MANUFACTURER = "ZTE"
 MODEL = "MC Series"
+DEFAULT_ALLOW_STALE_DATA = True
+CONF_ALLOW_STALE_DATA = "allow_stale_data"
+
 
 # Define friendly names for the sensors
 SENSOR_NAMES = {

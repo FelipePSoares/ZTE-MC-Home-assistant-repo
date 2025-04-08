@@ -2,7 +2,7 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 import voluptuous as vol
 
-from .const import DOMAIN, DEFAULT_USERNAME
+from .const import DOMAIN, DEFAULT_USERNAME,CONF_ALLOW_STALE_DATA, DEFAULT_ALLOW_STALE_DATA
 
 
 class ZTERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -11,7 +11,6 @@ class ZTERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def __init__(self):
-        """Initialize the config flow."""
         self.selected_router_type = None
         self.has_username = False
 
@@ -47,8 +46,6 @@ class ZTERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         base_schema = {
             vol.Required("router_ip"): str,
             vol.Required("router_password"): str,
-            #vol.Optional("ping_interval", default=100): int,
-            #vol.Optional("sms_check_interval", default=200): int,
             vol.Required("phone_number", default="13909"): str,
             vol.Required("sms_message", default="BRZINA"): str,
             vol.Optional("phone_number_1", default=""): str,
@@ -59,6 +56,7 @@ class ZTERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional("create_automation_clean", default=False): bool,
             vol.Optional("create_automation_reboot", default=False): bool,
             vol.Optional("enable_flux_sensors", default=False): bool,
+            vol.Optional("allow_stale_data", default=True): bool,
         }
 
         if self.has_username:
@@ -71,24 +69,23 @@ class ZTERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        """Return the options flow handler."""
         return ZTERouterOptionsFlowHandler(config_entry)
 
 
 class ZTERouterOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle an options flow for ZTE Router."""
+    """Handle the options flow for ZTE Router."""
 
-    def __init__(self, config_entry):
-        """Initialize ZTE Router options flow."""
-        self.config_entry = config_entry
+    def __init__(self, config_entry: config_entries.ConfigEntry):
+        """Initialize with the config entry without using deprecated assignment."""
+        self._config_entry = config_entry  # ✅ FIX: Use _config_entry instead of deprecated self.config_entry
 
     async def async_step_init(self, user_input=None):
         """Manage the options for the custom integration."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        data = self.config_entry.data
-        options = self.config_entry.options
+        data = self._config_entry.data
+        options = self._config_entry.options
 
         current_data = {
             "router_ip": data.get("router_ip"),
@@ -107,6 +104,7 @@ class ZTERouterOptionsFlowHandler(config_entries.OptionsFlow):
             "create_automation_clean": options.get("create_automation_clean", data.get("create_automation_clean", False)),
             "create_automation_reboot": options.get("create_automation_reboot", data.get("create_automation_reboot", False)),
             "enable_flux_sensors": options.get("enable_flux_sensors", data.get("enable_flux_sensors", True)),
+            "allow_stale_data": options.get("allow_stale_data", data.get("allow_stale_data", DEFAULT_ALLOW_STALE_DATA)),
         }
 
         options_schema = {
@@ -125,6 +123,8 @@ class ZTERouterOptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional("create_automation_clean", default=current_data["create_automation_clean"]): bool,
             vol.Optional("create_automation_reboot", default=current_data["create_automation_reboot"]): bool,
             vol.Optional("enable_flux_sensors", default=current_data["enable_flux_sensors"]): bool,
+            vol.Optional("allow_stale_data", default=current_data["allow_stale_data"]): bool,
+
         }
 
         if data.get("has_username", False):

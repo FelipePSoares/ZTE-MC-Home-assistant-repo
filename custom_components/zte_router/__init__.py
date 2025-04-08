@@ -5,7 +5,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import async_get as async_get_device_registry
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
-from .const import DOMAIN, MANUFACTURER, MODEL
+from .const import DOMAIN, MANUFACTURER, MODEL,CONF_ALLOW_STALE_DATA, DEFAULT_ALLOW_STALE_DATA
 from .sensor import ZTERouterDataUpdateCoordinator, ZTERouterSMSUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,7 +31,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     create_automation_reboot = config.get("create_automation_reboot", False)
 
     # Initialize coordinators with username if applicable
-    coordinator = ZTERouterDataUpdateCoordinator(hass, config["router_ip"], config["router_password"], username, ping_interval)
+    allow_stale_data = config.get(CONF_ALLOW_STALE_DATA, DEFAULT_ALLOW_STALE_DATA)
+    coordinator = ZTERouterDataUpdateCoordinator(
+        hass, config["router_ip"], config["router_password"], username, ping_interval, allow_stale_data
+    )
     sms_coordinator = ZTERouterSMSUpdateCoordinator(hass, config["router_ip"], config["router_password"], username, sms_check_interval)
 
     await coordinator.async_config_entry_first_refresh()
