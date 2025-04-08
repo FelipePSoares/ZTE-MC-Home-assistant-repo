@@ -486,12 +486,12 @@ class LastSMSSensor(ZTERouterEntity):
 
     async def async_handle_coordinator_update(self):
         old_state = self._state
-        _LOGGER.debug(f"Updating LastSMS sensor with new data: {self.coordinator.data}")
-        data = self.coordinator.data
-        if data and "id" in data:  # Make sure ID is in the data
-            self._state = data.get("id", "NO DATA")  # Set the state to the SMS ID
-            self._attributes = {k: v for k, v in data.items() if k != "id"}
-            self._attributes["content"] = data.get("content", "NO CONTENT")  # Move content to attributes
+        sms_data = self.coordinator.data.get("sms_data", {})
+        _LOGGER.debug(f"Updating LastSMS sensor with new data: {sms_data}")
+        if sms_data and "id" in sms_data:
+            self._state = sms_data.get("id", "NO DATA")
+            self._attributes = {k: v for k, v in sms_data.items() if k != "id"}
+            self._attributes["content"] = sms_data.get("content", "NO CONTENT")
             if "date" in self._attributes:
                 self._attributes["formatted_date"] = self.format_date(self._attributes["date"])
             _LOGGER.info(f"Last SMS sensor updated. Old state: {old_state}, New state: {self._state} (SMS ID)")
