@@ -147,30 +147,30 @@ class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self):
-        try:
-            new_data = {}
-            keys = {3: "dynamic_data", 6: "sms_data", 7: "status_data", 16: "client_data", 99: "diag_data"}
-            for cmd, label in keys.items():
+        new_data = {}
+        keys = {3: "dynamic_data", 6: "sms_data", 7: "status_data", 16: "client_data", 99: "diag_data"}
+        for cmd, label in keys.items():
+            try:
                 raw = await self.hass.async_add_executor_job(
                     self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, cmd
                 )
                 parsed = json.loads(extract_json(raw))
+                if parsed:
+                    new_data[label] = parsed
+                    new_data.update(parsed)
+                else:
+                    _LOGGER.warning(f"[ZTE] Empty response for command {cmd} ({label}), skipping.")
+            except Exception as e:
+                _LOGGER.error(f"[ZTE] Failed command {cmd} ({label}): {e}")
+                if not self.allow_stale_data:
+                    raise UpdateFailed(f"[ZTE] Critical failure on command {cmd}: {e}")
+                _LOGGER.warning(f"[ZTE] Allowing stale data due to error: {e}")
 
-                if not parsed:
-                    raise UpdateFailed(f"[ZTE] Empty or invalid response for command {cmd} ({label})")
+        if not new_data and not self.allow_stale_data:
+            raise UpdateFailed("[ZTE] No valid data obtained from router.")
 
-                new_data[label] = parsed
-                new_data.update(parsed)
-
-            self._data = new_data
-            return self._data
-
-        except Exception as err:
-            _LOGGER.error(f"Update failed: {err}")
-            if not self.allow_stale_data:
-                raise UpdateFailed(f"Router update failed: {err}")
-            _LOGGER.warning("Falling back to stale data")
-            return self._data
+        self._data = new_data or self._data  # Retain old data if new data is empty
+        return self._data
 
 
     def run_mc_script(self, ip, pwd, user, cmd, retries=3, delay=2):
@@ -679,22 +679,27 @@ class ConnectedBandsSensor(ZTERouterEntity):
                 _LOGGER.error(f"Invalid cell_id for conversion to int: {cell_id}")
                 enb_id = ""
 
-            self._state = f"MAIN:B{main_band}@{main_bandwidth}MHz CA:{ca_bands_formatted}"
+            if main_band and main_bandwidth:
+                self._state = f"MAIN:B{main_band}@{main_bandwidth}MHz CA:{ca_bands_formatted}"
+            else:
+                self._state = "No Bands Connected"
+
             self._attributes = {
-                "rmcc": rmcc,
-                "rmnc": rmnc,
-                "cell_id": cell_id,
-                "wan_ip": wan_ip,
-                "main_band": main_band,
-                "main_bandwidth": main_bandwidth,
-                "ca_bands": ca_bands,
-                "enb_id": enb_id,
+                "rmcc": rmcc or "--",
+                "rmnc": rmnc or "--",
+                "cell_id": cell_id or "--",
+                "wan_ip": wan_ip or "--",
+                "main_band": main_band or "--",
+                "main_bandwidth": main_bandwidth or "--",
+                "ca_bands": ca_bands or "--",
+                "enb_id": enb_id or "--",
             }
             _LOGGER.info(f"Connected Bands sensor updated. Old state: {old_state}, New state: {self._state}")
         else:
             _LOGGER.warning("Connected Bands sensor: No valid data or update failed. Setting state to Unavailable")
             self._state = None
         self.async_write_ha_state()
+
 
 class MonthlyUsageSensor(ZTERouterEntity):
     def __init__(self, coordinator):
