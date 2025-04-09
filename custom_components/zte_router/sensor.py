@@ -18,6 +18,20 @@ from .const import (
 )
 _LOGGER = logging.getLogger(__name__)
 
+def guard_stale_data(update_func):
+    async def wrapper(self, *args, **kwargs):
+        if not self.coordinator.last_update_success and not self.coordinator.allow_stale_data:
+            _LOGGER.warning(f"{self._name}: Clearing state due to failed update and stale data disabled.")
+            self._state = None
+            if hasattr(self, '_attributes'):
+                self._attributes.clear()
+            self.async_write_ha_state()
+            return
+        await update_func(self, *args, **kwargs)
+        self.async_write_ha_state()  # <-- ensure state always updates after success
+    return wrapper
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
     ip = entry.data["router_ip"]
     pwd = entry.data["router_password"]
@@ -134,17 +148,30 @@ class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self):
         try:
+            new_data = {}
             keys = {3: "dynamic_data", 6: "sms_data", 7: "status_data", 16: "client_data", 99: "diag_data"}
             for cmd, label in keys.items():
-                raw = await self.hass.async_add_executor_job(self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, cmd)
-                self._data[label] = json.loads(extract_json(raw))
-                self._data.update(self._data[label])
+                raw = await self.hass.async_add_executor_job(
+                    self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, cmd
+                )
+                parsed = json.loads(extract_json(raw))
+
+                if not parsed:
+                    raise UpdateFailed(f"[ZTE] Empty or invalid response for command {cmd} ({label})")
+
+                new_data[label] = parsed
+                new_data.update(parsed)
+
+            self._data = new_data
             return self._data
+
         except Exception as err:
             _LOGGER.error(f"Update failed: {err}")
             if not self.allow_stale_data:
                 raise UpdateFailed(f"Router update failed: {err}")
-            return self._data  # fallback to old data if allowed
+            _LOGGER.warning("Falling back to stale data")
+            return self._data
+
 
     def run_mc_script(self, ip, pwd, user, cmd, retries=3, delay=2):
         attempt = 0
@@ -227,6 +254,13 @@ class ZTERouterEntity(RestoreEntity, Entity):
         ))
         await self.async_handle_coordinator_update()
 
+    def _get_value(self, key):
+        """Strict fetch that respects allow_stale_data."""
+        if not self.coordinator.last_update_success and not self.coordinator.allow_stale_data:
+            _LOGGER.debug(f"[STRICT MODE] {self.name}: blocked access to stale key '{key}'")
+            return None
+        return self.coordinator.data.get(key)
+
     @property
     def is_diagnostics(self) -> bool:
         return getattr(self, "_attr_is_diagnostics", False)
@@ -289,6 +323,7 @@ class ZTESessionDiagnosticsSensor(ZTERouterEntity):
         _LOGGER.info("Manual update requested for Session Diagnostics sensor")
         await self.coordinator.async_request_refresh()
 
+    @guard_stale_data
     async def async_handle_coordinator_update(self):
         output = await self.coordinator.hass.async_add_executor_job(
             self.coordinator.run_mc_script,
@@ -366,6 +401,7 @@ class ZTERouterSensor(ZTERouterEntity):
         _LOGGER.info(f"Manual update requested for sensor {self._name} at {datetime.now()}")
         await self.coordinator.async_request_refresh()
 
+    @guard_stale_data
     async def async_handle_coordinator_update(self):
         old_state = self._state
         state_changed = False
@@ -484,6 +520,7 @@ class LastSMSSensor(ZTERouterEntity):
         _LOGGER.info(f"Manual update requested for Last SMS sensor at {datetime.now()}")
         await self.coordinator.async_request_refresh()
 
+    @guard_stale_data
     async def async_handle_coordinator_update(self):
         old_state = self._state
         sms_data = self.coordinator.data.get("sms_data", {})
@@ -494,9 +531,10 @@ class LastSMSSensor(ZTERouterEntity):
             self._attributes["content"] = sms_data.get("content", "NO CONTENT")
             if "date" in self._attributes:
                 self._attributes["formatted_date"] = self.format_date(self._attributes["date"])
-            _LOGGER.info(f"Last SMS sensor updated. Old state: {old_state}, New state: {self._state} (SMS ID)")
+            _LOGGER.info(f"Last SMS sensor updated. Old state: {old_state}, New state: {self._state}")
         else:
-            _LOGGER.warning(f"No new SMS data available. Retaining last state: {self._state}")
+            _LOGGER.warning("Last SMS sensor: No valid data or update failed. Setting state to Unavailable")
+            self._state = None
         self.async_write_ha_state()
 
     def format_date(self, date_str):
@@ -620,6 +658,7 @@ class ConnectedBandsSensor(ZTERouterEntity):
         _LOGGER.info(f"Manual update requested for Connected Bands sensor at {datetime.now()}")
         await self.coordinator.async_request_refresh()
 
+    @guard_stale_data
     async def async_handle_coordinator_update(self):
         old_state = self._state
         if self.coordinator.data:
@@ -653,7 +692,8 @@ class ConnectedBandsSensor(ZTERouterEntity):
             }
             _LOGGER.info(f"Connected Bands sensor updated. Old state: {old_state}, New state: {self._state}")
         else:
-            _LOGGER.warning(f"No data available for Connected Bands sensor. Retaining last state: {self._state}")
+            _LOGGER.warning("Connected Bands sensor: No valid data or update failed. Setting state to Unavailable")
+            self._state = None
         self.async_write_ha_state()
 
 class MonthlyUsageSensor(ZTERouterEntity):
@@ -707,6 +747,7 @@ class MonthlyUsageSensor(ZTERouterEntity):
         _LOGGER.info(f"Manual update requested for Monthly Usage sensor at {datetime.now()}")
         await self.coordinator.async_request_refresh()
 
+    @guard_stale_data
     async def async_handle_coordinator_update(self):
         old_state = self._state
         if self.coordinator.data:
@@ -717,7 +758,8 @@ class MonthlyUsageSensor(ZTERouterEntity):
             self._state = round(monthly_usage_gb, 2)
             _LOGGER.info(f"Monthly Usage sensor updated. Old state: {old_state}, New state: {self._state}")
         else:
-            _LOGGER.warning(f"No data available for Monthly Usage sensor. Retaining last state: {self._state}")
+            _LOGGER.warning(f"Monthly Usage sensor: No valid data or update failed. Setting state to Unavailable")
+            self._state = None
         self.async_write_ha_state()
 
 #define GB TX sensor
@@ -772,6 +814,7 @@ class monthly_tx_gb(ZTERouterEntity):
         _LOGGER.info(f"Manual update requested for Monthly TX GB sensor at {datetime.now()}")
         await self.coordinator.async_request_refresh()
 
+    @guard_stale_data
     async def async_handle_coordinator_update(self):
         old_state = self._state
         if self.coordinator.data:
@@ -781,7 +824,8 @@ class monthly_tx_gb(ZTERouterEntity):
             self._state = round(monthly_tx_gb, 2)
             _LOGGER.info(f"Monthly TX GB sensor updated. Old state: {old_state}, New state: {self._state}")
         else:
-            _LOGGER.warning(f"No data available for Monthly TX GB sensor. Retaining last state: {self._state}")
+            _LOGGER.warning(f"Monthly TX GB sensor: No valid data or update failed. Setting state to Unavailable")
+            self._state = None
         self.async_write_ha_state()
 
 #define GB RX sensor
@@ -836,6 +880,7 @@ class monthly_rx_gb(ZTERouterEntity):
         _LOGGER.info(f"Manual update requested for Monthly RX GB sensor at {datetime.now()}")
         await self.coordinator.async_request_refresh()
 
+    @guard_stale_data
     async def async_handle_coordinator_update(self):
         old_state = self._state
         if self.coordinator.data:
@@ -845,7 +890,8 @@ class monthly_rx_gb(ZTERouterEntity):
             self._state = round(monthly_rx_gb, 2)
             _LOGGER.info(f"Monthly RX GB sensor updated. Old state: {old_state}, New state: {self._state}")
         else:
-            _LOGGER.warning(f"No data available for Monthly RX GB sensor. Retaining last state: {self._state}")
+            _LOGGER.warning(f"Monthly RX GB sensor: No valid data or update failed. Setting state to Unavailable")
+            self._state = None
         self.async_write_ha_state()
 
 #define DataLeftSensor
@@ -900,6 +946,7 @@ class DataLeftSensor(ZTERouterEntity):
         _LOGGER.info(f"Manual update requested for Data Left sensor at {datetime.now()}")
         await self.coordinator.async_request_refresh()
 
+    @guard_stale_data
     async def async_handle_coordinator_update(self):
         old_state = self._state
         if self.coordinator.data:
@@ -910,7 +957,8 @@ class DataLeftSensor(ZTERouterEntity):
             self._state = round(data_left, 2)
             _LOGGER.info(f"Data Left sensor updated. Old state: {old_state}, New state: {self._state}")
         else:
-            _LOGGER.warning(f"No data available for Data Left sensor. Retaining last state: {self._state}")
+            _LOGGER.warning("Data Left sensor: No valid data or update failed. Setting state to Unavailable")
+            self._state = None
         self.async_write_ha_state()
 
 class ConnectionUptimeSensor(ZTERouterEntity):
@@ -964,6 +1012,7 @@ class ConnectionUptimeSensor(ZTERouterEntity):
         _LOGGER.info(f"Manual update requested for Connection Uptime sensor at {datetime.now()}")
         await self.coordinator.async_request_refresh()
 
+    @guard_stale_data
     async def async_handle_coordinator_update(self):
         old_state = self._state
         if self.coordinator.data:
@@ -972,7 +1021,8 @@ class ConnectionUptimeSensor(ZTERouterEntity):
             self._state = round(uptime_hours, 2)
             _LOGGER.info(f"Connection Uptime sensor updated. Old state: {old_state}, New state: {self._state}")
         else:
-            _LOGGER.warning(f"No data available for Connection Uptime sensor. Retaining last state: {self._state}")
+            _LOGGER.warning("Connection Uptime sensor: No valid data or update failed. Setting state to Unavailable")
+            self._state = None
         self.async_write_ha_state()
 
 class ConnectedDevicesSensor(ZTERouterEntity):
@@ -1023,6 +1073,7 @@ class ConnectedDevicesSensor(ZTERouterEntity):
         _LOGGER.info(f"Manual update requested for Connected Devices sensor at {datetime.now()}")
         await self.coordinator.async_request_refresh()
 
+    @guard_stale_data
     async def async_handle_coordinator_update(self):
         if self.coordinator.data:
             station_list = self.coordinator.data.get("station_list", [])
@@ -1055,6 +1106,11 @@ class WiFiClientsSensor(ZTERouterEntity):
         return f"{DOMAIN}_{self.coordinator.ip_entry}_wifi_clients"
 
     @property
+    def available(self):
+        # Add this to clearly indicate availability
+        return self._state is not None
+
+    @property
     def extra_state_attributes(self):
         return self._attributes
 
@@ -1075,31 +1131,31 @@ class WiFiClientsSensor(ZTERouterEntity):
     async def async_update(self):
         await self.coordinator.async_request_refresh()
 
+    @guard_stale_data
     async def async_handle_coordinator_update(self):
-        if self.coordinator.data:
-            wifi_clients = self.coordinator.data.get("station_list", [])
-            self._state = len(wifi_clients)
+        wifi_clients = self.coordinator.data.get("station_list") if self.coordinator.data else None
 
+        if wifi_clients is not None:
+            self._state = len(wifi_clients)
             formatted_clients = []
             for client in wifi_clients:
-                    formatted_clients.append({
-                        "Hostname": client.get("hostname", "--"),
-                        "MAC Address": client.get("mac_addr", "--"),
-                        "IP Address": client.get("ip_addr", "--"),
-                        "Speed": f"{client.get('agreed_rate', '--')} Mbps",
-                        "Connected": format_seconds(client.get("connect_time", 0)),
-                        "Address Type": client.get("addr_type", "--"),
-                        "Type": client.get("type", "--"),
-                    })
-
-
-
+                formatted_clients.append({
+                    "Hostname": client.get("hostname", "--"),
+                    "MAC Address": client.get("mac_addr", "--"),
+                    "IP Address": client.get("ip_addr", "--"),
+                    "Speed": f"{client.get('agreed_rate', '--')} Mbps",
+                    "Connected": format_seconds(client.get("connect_time", 0)),
+                    "Address Type": client.get("addr_type", "--"),
+                    "Type": client.get("type", "--"),
+                })
             self._attributes["wifi_clients"] = formatted_clients
             _LOGGER.info(f"WiFi Clients sensor updated: {self._state} devices")
         else:
-            _LOGGER.warning("No data for WiFi Clients")
-        self.async_write_ha_state()
+            _LOGGER.warning("WiFi Clients sensor: No data available or update failed. Setting state to unavailable.")
+            self._state = None
+            self._attributes.clear()
 
+        self.async_write_ha_state()
 
 
 class LANClientsSensor(ZTERouterEntity):
@@ -1119,6 +1175,11 @@ class LANClientsSensor(ZTERouterEntity):
     @property
     def state(self):
         return len(self._attributes.get("lan_clients", []))
+
+    @property
+    def available(self):
+        # Add this to clearly indicate availability
+        return self._state is not None
 
     @property
     def unique_id(self):
@@ -1145,11 +1206,12 @@ class LANClientsSensor(ZTERouterEntity):
     async def async_update(self):
         await self.coordinator.async_request_refresh()
 
+    @guard_stale_data
     async def async_handle_coordinator_update(self):
-        if self.coordinator.data:
-            lan_clients = self.coordinator.data.get("lan_station_list", [])
-            self._state = len(lan_clients)
+        lan_clients = self.coordinator.data.get("lan_station_list") if self.coordinator.data else None
 
+        if lan_clients is not None:
+            self._state = len(lan_clients)
             formatted_clients = []
             for client in lan_clients:
                 formatted_clients.append({
@@ -1161,13 +1223,16 @@ class LANClientsSensor(ZTERouterEntity):
                     "Address Type": client.get("addr_type", "--"),
                     "Type": client.get("type", "--"),
                 })
-
-
             self._attributes["lan_clients"] = formatted_clients
             _LOGGER.info(f"LAN Clients sensor updated: {self._state} devices")
         else:
-            _LOGGER.warning("No data for LAN Clients")
+            _LOGGER.warning("LAN Clients sensor: No data available or update failed. Setting state to unavailable.")
+            self._state = None
+            self._attributes.clear()
+
         self.async_write_ha_state()
+
+
 
 def format_seconds(seconds):
     try:
@@ -1217,12 +1282,12 @@ class ZTEDataStatisticsSensor(ZTERouterEntity):
 
     @property
     def state(self):
-        raw = self.coordinator.data.get(self._key)
+        raw = self._get_value(self._key)
         _LOGGER.debug(f"[FLUX] {self._name}: Raw value = {repr(raw)}")
 
         if raw in [None, "", "null"]:
             _LOGGER.warning(f"[FLUX] {self._name}: Missing or empty value")
-            return "N/A"
+            return None if not self.coordinator.allow_stale_data else "N/A"
 
         try:
             clean_raw = str(raw).strip()
@@ -1237,30 +1302,23 @@ class ZTEDataStatisticsSensor(ZTERouterEntity):
                     result = round(gb_value / 1024, 2)
                 else:
                     result = round(gb_value, 2)
-                _LOGGER.info(f"[FLUX] {self._name}: {value} bytes => {result} {self._unit}")
                 return result
 
             elif self._key.endswith("_time"):
-                formatted = self.format_seconds(value)
-                _LOGGER.info(f"[FLUX] {self._name}: {value} seconds => {formatted}")
-                return formatted
+                return self.format_seconds(value)
 
             elif self._key in THROUGHPUT_KEYS:
-                formatted = self.format_throughput(value)
-                _LOGGER.info(f"[FLUX] {self._name}: {value} bps => {formatted}")
-                return formatted
+                return self.format_throughput(value)
 
             elif self._key == "date_month":
-                result = f"{clean_raw[:4]}-{clean_raw[4:6]}" if len(clean_raw) == 8 else clean_raw
-                _LOGGER.info(f"[FLUX] {self._name}: Parsed date => {result}")
-                return result
+                return f"{clean_raw[:4]}-{clean_raw[4:6]}" if len(clean_raw) == 8 else clean_raw
 
-            _LOGGER.info(f"[FLUX] {self._name}: Raw int value returned = {value}")
             return value
 
         except (ValueError, TypeError) as e:
             _LOGGER.warning(f"[FLUX] {self._name}: Failed to convert value '{raw}' - {e}")
-            return "N/A"
+            return None if not self.coordinator.allow_stale_data else "N/A"
+
 
     @property
     def unit_of_measurement(self):
@@ -1295,6 +1353,7 @@ class ZTEDataStatisticsSensor(ZTERouterEntity):
         _LOGGER.debug(f"[FLUX] Manual update requested for {self._name}")
         await self.coordinator.async_request_refresh()
 
+    @guard_stale_data
     async def async_handle_coordinator_update(self):
         _LOGGER.debug(f"[FLUX] Coordinator update triggered for {self._name}")
         self.async_write_ha_state()
@@ -1336,21 +1395,24 @@ class ZTEFluxTotalUsageSensor(ZTEFluxSensor):
 
     @property
     def state(self):
+        if not self.coordinator.last_update_success and not self.coordinator.allow_stale_data:
+            _LOGGER.warning("[FLUX] Total Usage: Clearing state due to failed update and stale data disabled.")
+            return None
         try:
-            tx_raw = self.coordinator.data.get("flux_monthly_tx_bytes", "0")
-            rx_raw = self.coordinator.data.get("flux_monthly_rx_bytes", "0")
-            _LOGGER.debug(f"[FLUX] Total TX raw: {tx_raw} | RX raw: {rx_raw}")
+            tx_raw = self._get_value("flux_monthly_tx_bytes")
+            rx_raw = self._get_value("flux_monthly_rx_bytes")
 
             tx = int(float(tx_raw.strip())) if tx_raw else 0
             rx = int(float(rx_raw.strip())) if rx_raw else 0
 
             total_gb = (tx + rx) / 1024 / 1024 / 1024
-            result = round(total_gb, 2)
-            _LOGGER.info(f"[FLUX] Total Monthly Usage: TX={tx}, RX={rx}, Total={result} GB")
-            return result
+            return round(total_gb, 2)
+
         except Exception as e:
-            _LOGGER.warning(f"[FLUX] Total Usage: Failed to calculate - {e}")
-            return "N/A"
+            _LOGGER.warning(f"[FLUX] Total Usage calculation failed: {e}")
+            return None
+
+
 
     @property
     def unique_id(self):
