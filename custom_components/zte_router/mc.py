@@ -680,7 +680,8 @@ class zteRouter:
             param_groups = {
                 "system_info": (
                     "wa_inner_version,cr_version,loginfo,new_version_state,current_upgrade_state,"
-                    "is_mandatory,modem_main_state,pin_status,signalbar,imei"
+                    "is_mandatory,modem_main_state,pin_status,signalbar,imei,"
+                    "imsi,iccid,hardware_version,wa_version,sim_imsi,mac_address,web_version,LocalDomain"
                 ),
                 "radio_network": (
                     "network_type,network_provider,network_provider_fullname,rmcc,rmnc,mdm_mcc,mdm_mnc,"
@@ -699,6 +700,9 @@ class zteRouter:
                     "ppp_status,pppoe_status,dial_mode,dhcp_wan_status,static_wan_status,static_wan_ipaddr,"
                     "ip_passthrough_enabled,vpn_conn_status,ppp_dial_conn_fail_counter"
                 ),
+                "ipv6_config": (
+                    "ipv6_wan_ipaddr,pdp_type,ipv6_pdp_type,pdp_type_ui,ipv6_pdp_type_ui"
+                ),
                 "wifi": (
                     "wifi_enable,wifi_onoff_state,wifi_5g_enable,wifi_chip_temp,wifi_dfs_status,ssid,EX_SSID1,EX_wifi_profile,"
                     "m_ssid_enable,m_SSID2,wifi_chip1_ssid1_ssid,wifi_chip2_ssid1_ssid,wifi_chip1_ssid1_auth_mode,"
@@ -706,6 +710,12 @@ class zteRouter:
                     "wifi_chip1_ssid1_access_sta_num,wifi_chip2_ssid1_access_sta_num,wifi_chip1_ssid2_max_access_num,"
                     "wifi_chip2_ssid2_max_access_num,wifi_chip1_ssid1_wifi_coverage,wifi_access_sta_num,sta_ip_status,"
                     "guest_switch"
+                ),
+                "wifi_advanced": (
+                    "wifi_chip1_ssid1_password_encode,wifi_chip2_ssid1_password_encode,wifi_chip1_ssid1_switch_onoff,"
+                    "wifi_chip2_ssid1_switch_onoff,wifi_chip1_ssid2_switch_onoff,wifi_chip2_ssid2_switch_onoff,"
+                    "wifi_chip1_ssid1_max_access_num,wifi_chip2_ssid1_max_access_num,wifi_chip2_ssid2_max_access_num,"
+                    "wifi_chip2_ssid2_ssid,wifi_chip1_ssid2_ssid,wifi_lbd_enable,m_HideSSID,station_ip_addr"
                 ),
                 "power_sensors": (
                     "battery_value,battery_pers,battery_charging,battery_vol_percent,pm_modem_5g,pm_sensor_5g,"
@@ -727,7 +737,8 @@ class zteRouter:
                     "dns_mode,prefer_dns_manual,standby_dns_manual"
                 ),
                 "unclassified": (
-                    "RadioOff,apn_interface_version,bandwidth"
+                    "RadioOff,apn_interface_version,bandwidth,"
+                    "network_information,Lte_ca_status"
                 )
             }
 
@@ -773,8 +784,17 @@ class zteRouter:
                 combined_data["__partial"] = True
                 combined_data["__errors__"] = failed_groups
 
+            # Convert all values to strings to ensure Home Assistant compatibility
+            for key, value in combined_data.items():
+                if not isinstance(value, str):
+                    try:
+                        combined_data[key] = str(value)
+                    except Exception:
+                        combined_data[key] = "N/A"
+
             logger.info("✅ Fetched ZTE info using hybrid strategy")
             return json.dumps(combined_data)
+
 
         except Exception as e:
             logger.error(f"❌ Critical failure in zteinfo3: {e}")
