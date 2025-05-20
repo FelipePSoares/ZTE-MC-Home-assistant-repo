@@ -1,3 +1,5 @@
+global_stok = None
+global_AD = None
 import hashlib
 from datetime import datetime, timedelta
 import json
@@ -19,17 +21,6 @@ import traceback  # <-- add this at the top if not already
 from logging.handlers import TimedRotatingFileHandler
 import gzip
 import shutil
-
-session = {
-    "created": datetime.now().isoformat(),
-    "expires_in": "N/A",
-    "last_command": None,
-    "last_successful_cmd": None,
-    "last_error": None,
-    "total_requests": 0,
-    "last_latency_ms": 0,
-}
-
 
 # Disable warnings for insecure connections
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -63,7 +54,7 @@ if __name__ == "__main__":
             log_path,
             when='midnight',
             interval=1,
-            backupCount=7,
+            backupCount=1,
             encoding='utf-8',
             utc=False
         )
@@ -98,7 +89,6 @@ if __name__ == "__main__":
         # Optional: trigger rollover + compress manually at startup
         # doRolloverAndCompress()
 
-
 else:
     # Suppress logging when imported
     logger.setLevel(logging.WARNING)
@@ -125,61 +115,47 @@ def hex2utf(string):
         return result
 
 class zteRouter:
+
+    def authenticate(self):
+        """Authenticate and store credentials (stok and AD) in instance fields."""
+        LD = self.get_LD()
+        AD = self.get_AD()
+        stok = self.getCookie(self.username, self.password, LD, AD)
+        self._zte_auth_stok = stok
+        self._zte_auth_AD = AD
+        self._zte_auth_LD = LD
+        logger.info("Authentication credentials stored in object instance")
+
     def __init__(self, ip, username, password):
         self.ip = ip
-        self.protocol = "http"  # default to http
+        self.protocol = "http"
         self.username = username
         self.password = password
-        self.cookies = {}  # Existing cookie management
+        self.cookies = {}
         self.stok = None
-        self.session_expiry = datetime.min  # Initialize expiry in the past
+        self.uses_stok = False
         logger.info(f"Initializing ZTE Router with IP {ip}, Username: {username}, Password: {password}")
+
         self.try_set_protocol()
         self.referer = f"{self.protocol}://{self.ip}/"
 
     CERT_FILE = "/tmp/zte_router_cert.pem"
 
-    def invalidate_session(self):
-        logger.info("Invalidating session cookie")
-        self.stok = None
-        self.session_expiry = datetime.min
-
     def request_with_session(self, method, url, headers=None, body=None):
         if headers is None:
             headers = {}
-        cookie_header = self.build_cookie_header()
-        if cookie_header:
-            headers['Cookie'] = cookie_header
-
+        if self.stok:
+            headers['Cookie'] = f'stok={self.stok}'
+        # Remove cookie header logic, always use instance cookies set at authentication
+        # No build_cookie_header, but still allow for legacy compatibility if needed
+        # (In future, could remove all cookie logic)
         start_time = time.perf_counter()
         response = s.request(method, url, headers=headers, body=body)
         latency = int((time.perf_counter() - start_time) * 1000)
 
-        if response.status in [401, 403] or 'error' in response.data.decode('utf-8').lower():
-            logger.warning(f"Session invalid detected (status {response.status}), re-logging in.")
-            self.invalidate_session()
-            self.getCookie(self.username, self.password, self.get_LD())
-
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                headers['Cookie'] = cookie_header
-
-            # Start timer again for the retry
-            start_time = time.perf_counter()
-            response = s.request(method, url, headers=headers, body=body)
-            latency = int((time.perf_counter() - start_time) * 1000)
-
-        elif response.status in [502, 503, 504] or response.status >= 520:
+        if response.status in [502, 503, 504] or response.status >= 520:
             logger.error(f"Router unavailable (status {response.status})")
             raise ConnectionError(f"Router unavailable (status {response.status})")
-
-        # Log total requests and latency
-        session["total_requests"] += 1
-        session["last_latency_ms"] = latency
-
-        # Update cookies after request
-        self.update_cookies(response.headers.get('Set-Cookie', ''))
-
         return response
 
         
@@ -274,16 +250,7 @@ class zteRouter:
             logger.error(f"Failed to parse certificate: {e}")
 
 
-    def update_cookies(self, set_cookie_header):
-        if set_cookie_header:
-            cookie = SimpleCookie()
-            cookie.load(set_cookie_header)
-            for key, morsel in cookie.items():
-                self.cookies[key] = morsel.value
-
-    def build_cookie_header(self):
-        cookie_header = '; '.join(f'{key}={value}' for key, value in self.cookies.items())
-        return cookie_header
+    # Remove update_cookies and build_cookie_header (no longer needed)
 
     def try_set_protocol(self):
         protocols = ["https", "http"]
@@ -313,18 +280,11 @@ class zteRouter:
     def getVersion(self):
         logger.debug("Fetching router version")
         header = {"Referer": self.referer}
-        # Include cookies if any
-        cookie_header = self.build_cookie_header()
-        if cookie_header:
-            header['Cookie'] = cookie_header
         payload = "isTest=false&cmd=wa_inner_version"
         url = self.referer + f"goform/goform_get_cmd_process?{payload}"
         try:
             r = self.request_with_session('GET', url, headers=header)
             data = r.data.decode('utf-8')
-            # Update cookies
-            set_cookie_header = r.headers.get('Set-Cookie', '')
-            self.update_cookies(set_cookie_header)
             version = json.loads(data)["wa_inner_version"]
             logger.info(f"Router version: {version}")
             return version
@@ -335,18 +295,11 @@ class zteRouter:
     def get_LD(self):
         logger.debug("Fetching LD value")
         header = {"Referer": self.referer}
-        # Include cookies if any
-        cookie_header = self.build_cookie_header()
-        if cookie_header:
-            header['Cookie'] = cookie_header
         payload = "isTest=false&cmd=LD"
         url = self.referer + f"goform/goform_get_cmd_process?{payload}"
         try:
             r = self.request_with_session('GET', url, headers=header)
             data = r.data.decode('utf-8')
-            # Update cookies
-            set_cookie_header = r.headers.get('Set-Cookie', '')
-            self.update_cookies(set_cookie_header)
             ld = json.loads(data)["LD"].upper()
             logger.info(f"LD: {ld}")
             return ld
@@ -354,24 +307,14 @@ class zteRouter:
             logger.error(f"Failed to fetch LD: {e}")
             return ""
 
-    def getCookie(self, username, password, LD):
+    def getCookie(self, username, password, LD, AD):
         logger.debug(f"Getting cookie for username: {username}, password: {password}, LD: {LD}")
-        if self.stok is not None and datetime.now() < self.session_expiry:
-            logger.info(f"🟢 Reusing in-memory session: stok={self.stok}")
-            return self.stok
-        else:
-            logger.info("🔄 No valid session in memory, performing fresh login")
-
-
         header = {"Referer": self.referer}
-        cookie_header = self.build_cookie_header()
-        if cookie_header:
-            header['Cookie'] = cookie_header
 
         hashPassword = self.hash(password).upper()
         ztePass = self.hash(hashPassword + LD).upper()
 
-        AD = self.get_AD()
+        #AD = self.get_AD()
 
         if username:
             goform_id = 'LOGIN_MULTI_USER'
@@ -396,21 +339,26 @@ class zteRouter:
 
         try:
             r = self.request_with_session('POST', url, headers=header, body=body)
+            # Parse cookies from response for session storage
+            cookie = SimpleCookie()
             set_cookie_header = r.headers.get('Set-Cookie', '')
-            self.update_cookies(set_cookie_header)
-
-            stok = self.cookies.get('stok')
-            if not stok:
-                logger.error("Failed to obtain a valid cookie from the router")
-                raise ValueError("Failed to obtain a valid cookie from the router")
-
-            # Set session expiry (e.g., valid for 60 minutes)
-            self.session_expiry = datetime.now() + timedelta(minutes=1)
-            session["expires_in"] = f"{int((self.session_expiry - datetime.now()).total_seconds() / 60)} min"
-            self.stok = stok
-            logger.info(f"Obtained new session cookie: stok={stok}")
-            return stok
-
+            if set_cookie_header:
+                cookie.load(set_cookie_header)
+            stok = cookie.get('stok')
+            if stok:
+                self.uses_stok = True
+                self.stok = stok.value
+                logger.info(f"🔐 Router uses stok: {self.stok}")
+            else:
+                self.uses_stok = False
+                self.stok = None
+                logger.info("🔓 Router does NOT use stok (cookie-based only login)")
+            # Save cookies for use in subsequent requests
+            self.cookies = {}
+            for key, morsel in cookie.items():
+                self.cookies[key] = morsel.value
+            logger.info(f"Obtained new session cookie: stok={self.stok}")
+            return self.stok
         except Exception as e:
             logger.error(f"Failed to obtain cookie: {e}")
             raise
@@ -419,18 +367,11 @@ class zteRouter:
     def get_RD(self):
         logger.debug("Fetching RD value")
         header = {"Referer": self.referer}
-        # Include cookies if any
-        cookie_header = self.build_cookie_header()
-        if cookie_header:
-            header['Cookie'] = cookie_header
         payload = "isTest=false&cmd=RD"
         url = self.referer + f"goform/goform_get_cmd_process?{payload}"
         try:
             r = self.request_with_session('POST', url, headers=header)
             data = r.data.decode('utf-8')
-            # Update cookies
-            set_cookie_header = r.headers.get('Set-Cookie', '')
-            self.update_cookies(set_cookie_header)
             rd = json.loads(data)["RD"]
             logger.info(f"RD: {rd}")
             return rd
@@ -464,16 +405,10 @@ class zteRouter:
         a = hash_function(wa_inner_version + cr_version)
 
         header = {"Referer": self.referer}
-        cookie_header = self.build_cookie_header()
-        if cookie_header:
-            header['Cookie'] = cookie_header
         try:
             rd_url = self.referer + "goform/goform_get_cmd_process?isTest=false&cmd=RD"
             rd_response = self.request_with_session('GET', rd_url, headers=header)
             data = rd_response.data.decode('utf-8')
-            # Update cookies
-            set_cookie_header = rd_response.headers.get('Set-Cookie', '')
-            self.update_cookies(set_cookie_header)
             rd_json = json.loads(data)
             u = rd_json.get("RD", "")
 
@@ -489,21 +424,12 @@ class zteRouter:
     def sendsms(self, phone_number, message):
         logger.debug(f"Sending SMS to {phone_number} with message: {message}")
         try:
-            self.getCookie(username=self.username, password=self.password, LD=self.get_LD())
-            AD = self.get_AD()
+            AD = getattr(self, "_zte_auth_AD", None)
             header = {"Referer": self.referer}
-            
-            # Build Cookie header
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
-
             # Encode phone number and message
             phoneNumberEncoded = urllib.parse.quote(phone_number, safe="")
             messageEncoded = encodeMessage(message)
-            
             logger.debug(f"Encoded SMS (GSM 7-bit): {messageEncoded}")
-
             payload = {
                 'isTest': 'false',
                 'goformId': 'SEND_SMS',
@@ -515,12 +441,9 @@ class zteRouter:
                 'encode_type': 'GSM7_default',
                 'AD': AD
             }
-
             encoded_payload = urllib.parse.urlencode(payload)
             body = encoded_payload.encode('utf-8')
-
             r = self.request_with_session('POST', self.referer + "goform/goform_set_cmd_process", headers=header, body=body)
-
             logger.info(f"SMS sent with status code: {r.status}")
             logger.debug(f"Router response: {r.data.decode(errors='replace')}")
             return r.status
@@ -534,23 +457,13 @@ class zteRouter:
     def zteinfo(self):
         logger.debug("Fetching ZTE info")
         try:
-            # Get LD and update cookies
-            LD = self.get_LD()
-            # getCookie will update self.cookies
-            self.getCookie(username=self.username, password=self.password, LD=LD)
             header = {
                 "Host": self.ip,
                 "Referer": f"{self.referer}index.html",
             }
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
-            cmd_url = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&cmd=wa_inner_version%2Ccr_version%2Cnetwork_type%2Crssi%2Crscp%2Crmcc%2Crmnc%2Cenodeb_id%2Clte_rsrq%2Clte_rsrp%2CZ5g_snr%2CZ5g_rsrp%2CZCELLINFO_band%2CZ5g_dlEarfcn%2Clte_ca_pcell_arfcn%2Clte_ca_pcell_band%2Clte_ca_scell_band%2Clte_ca_pcell_bandwidth%2Clte_ca_scell_info%2Clte_ca_scell_bandwidth%2Cwan_lte_ca%2Clte_pci%2CZ5g_CELL_ID%2CZ5g_SINR%2Ccell_id%2Cwan_lte_ca%2Clte_ca_pcell_band%2Clte_ca_pcell_bandwidth%2Clte_ca_scell_band%2Clte_ca_scell_bandwidth%2Clte_ca_pcell_arfcn%2Clte_ca_scell_arfcn%2Clte_multi_ca_scell_info%2Cwan_active_band%2Cnr5g_pci%2Cnr5g_action_band%2Cnr5g_cell_id%2Clte_snr%2Cecio%2Cwan_active_channel%2Cnr5g_action_channel%2Cngbr_cell_info%2Cmonthly_tx_bytes%2Cmonthly_rx_bytes%2Clte_pci%2Clte_pci_lock%2Clte_earfcn_lock%2Cwan_ipaddr%2Cwan_apn%2Cpm_sensor_mdm%2Cpm_modem_5g%2Cnr5g_pci%2Cnr5g_action_channel%2Cnr5g_action_band%2CZ5g_SINR%2CZ5g_rsrp%2Cwan_active_band%2Cwan_active_channel%2Cwan_lte_ca%2Clte_multi_ca_scell_info%2Ccell_id%2Cdns_mode%2Cprefer_dns_manual%2Cstandby_dns_manual%2Cnetwork_type%2Crmcc%2Crmnc%2Clte_rsrq%2Clte_rssi%2Clte_rsrp%2Clte_snr%2Cwan_lte_ca%2Clte_ca_pcell_band%2Clte_ca_pcell_bandwidth%2Clte_ca_scell_band%2Clte_ca_scell_bandwidth%2Clte_ca_pcell_arfcn%2Clte_ca_scell_arfcn%2Cwan_ipaddr%2Cstatic_wan_ipaddr%2Copms_wan_mode%2Copms_wan_auto_mode%2Cppp_status%2Cloginfo%2Crealtime_time%2Csignalbar&multi_data=1"
+            cmd_url = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&cmd=wa_inner_version%2Ccr_version%2Cnetwork_type%2Crssi%2Crscp%2Crmcc%2Crmnc%2Cenodeb_id%2C5g_rx0_rsrp%2C5g_rx1_rsrp%2Clte_rsrq%2Clte_rsrp%2CZ5g_snr%2CZ5g_rsrp%2CZCELLINFO_band%2CZ5g_dlEarfcn%2Clte_ca_pcell_arfcn%2Clte_ca_pcell_band%2Clte_ca_scell_band%2Clte_ca_pcell_bandwidth%2Clte_ca_scell_info%2Clte_ca_scell_bandwidth%2Cwan_lte_ca%2Clte_pci%2CZ5g_CELL_ID%2CZ5g_SINR%2Ccell_id%2Cwan_lte_ca%2Clte_ca_pcell_band%2Clte_ca_pcell_bandwidth%2Clte_ca_scell_band%2Clte_ca_scell_bandwidth%2Clte_ca_pcell_arfcn%2Clte_ca_scell_arfcn%2Clte_multi_ca_scell_info%2Cwan_active_band%2Cnr5g_pci%2Cnr5g_action_band%2Cnr5g_cell_id%2Clte_snr%2Cecio%2Cwan_active_channel%2Cnr5g_action_channel%2Cngbr_cell_info%2Cmonthly_tx_bytes%2Cmonthly_rx_bytes%2Clte_pci%2Clte_pci_lock%2Clte_earfcn_lock%2Cwan_ipaddr%2Cwan_apn%2Cpm_sensor_mdm%2Cpm_modem_5g%2Cnr5g_pci%2Cnr5g_action_channel%2Cnr5g_action_band%2CZ5g_SINR%2CZ5g_rsrp%2Cwan_active_band%2Cwan_active_channel%2Cwan_lte_ca%2Clte_multi_ca_scell_info%2Ccell_id%2Cdns_mode%2Cprefer_dns_manual%2Cstandby_dns_manual%2Cnetwork_type%2Crmcc%2Crmnc%2Clte_rsrq%2Clte_rssi%2Clte_rsrp%2Clte_snr%2Cwan_lte_ca%2Clte_ca_pcell_band%2Clte_ca_pcell_bandwidth%2Clte_ca_scell_band%2Clte_ca_scell_bandwidth%2Clte_ca_pcell_arfcn%2Clte_ca_scell_arfcn%2Cwan_ipaddr%2Cstatic_wan_ipaddr%2Copms_wan_mode%2Copms_wan_auto_mode%2Cppp_status%2Cloginfo%2Crealtime_time%2Csignalbar&multi_data=1"
             response = self.request_with_session('GET', cmd_url, headers=header)
             data = response.data.decode('utf-8')
-            # Update cookies
-            set_cookie_header = response.headers.get('Set-Cookie', '')
-            self.update_cookies(set_cookie_header)
             logger.info("Fetched ZTE info successfully")
             return data
         except Exception as e:
@@ -562,23 +475,13 @@ class zteRouter:
     def zteinfo2(self):
         logger.debug("Fetching ZTE info 2")
         try:
-            # Get LD and update cookies
-            LD = self.get_LD()
-            # getCookie will update self.cookies
-            self.getCookie(username=self.username, password=self.password, LD=LD)
             header = {
                 "Host": self.ip,
                 "Referer": f"{self.referer}index.html",
             }
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
             cmd_url = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?multi_data=1&isTest=false&sms_received_flag_flag=0&sts_received_flag_flag=0&cmd=network_type%2Crssi%2Clte_rssi%2Crscp%2Clte_rsrp%2CZ5g_snr%2CZ5g_rsrp%2CZCELLINFO_band%2CZ5g_dlEarfcn%2Clte_ca_pcell_arfcn%2Clte_ca_pcell_band%2Clte_ca_scell_band%2Clte_ca_pcell_bandwidth%2Clte_ca_scell_info%2Clte_ca_scell_bandwidth%2Cwan_lte_ca%2Clte_pci%2CZ5g_CELL_ID%2CZ5g_SINR%2Ccell_id%2Cwan_lte_ca%2Clte_ca_pcell_band%2Clte_ca_pcell_bandwidth%2Clte_ca_scell_band%2Clte_ca_scell_bandwidth%2Clte_ca_pcell_arfcn%2Clte_ca_scell_arfcn%2Clte_multi_ca_scell_info%2Cwan_active_band%2Cnr5g_pci%2Cnr5g_action_band%2Cnr5g_cell_id%2Clte_snr%2Cecio%2Cwan_active_channel%2Cnr5g_action_channel%2Cmodem_main_state%2Cpin_status%2Copms_wan_mode%2Copms_wan_auto_mode%2Cloginfo%2Cnew_version_state%2Ccurrent_upgrade_state%2Cis_mandatory%2Cwifi_dfs_status%2Cbattery_value%2Cppp_dial_conn_fail_counter%2Cwifi_chip1_ssid1_auth_mode%2Cwifi_chip2_ssid1_auth_mode%2Csignalbar%2Cnetwork_type%2Cnetwork_provider%2Cppp_status%2Csimcard_roam%2Cspn_name_data%2Cspn_b1_flag%2Cspn_b2_flag%2Cwifi_onoff_state%2Cwifi_chip1_ssid1_ssid%2Cwifi_chip2_ssid1_ssid%2Cwan_lte_ca%2Cmonthly_tx_bytes%2Cmonthly_rx_bytes%2Cpppoe_status%2Cdhcp_wan_status%2Cstatic_wan_status%2Crmcc%2Crmnc%2Cmdm_mcc%2Cmdm_mnc%2CEX_SSID1%2Csta_ip_status%2CEX_wifi_profile%2Cm_ssid_enable%2CRadioOff%2Cwifi_chip1_ssid1_access_sta_num%2Cwifi_chip2_ssid1_access_sta_num%2Clan_ipaddr%2Cstation_mac%2Cwifi_access_sta_num%2Cbattery_charging%2Cbattery_vol_percent%2Cbattery_pers%2Crealtime_tx_bytes%2Crealtime_rx_bytes%2Crealtime_time%2Crealtime_tx_thrpt%2Crealtime_rx_thrpt%2Cmonthly_time%2Cdate_month%2Cdata_volume_limit_switch%2Cdata_volume_limit_size%2Cdata_volume_alert_percent%2Cdata_volume_limit_unit%2Croam_setting_option%2Cupg_roam_switch%2Cssid%2Cwifi_enable%2Cwifi_5g_enable%2Ccheck_web_conflict%2Cdial_mode%2Cprivacy_read_flag%2Cis_night_mode%2Cvpn_conn_status%2Cwan_connect_status%2Csms_received_flag%2Csts_received_flag%2Csms_unread_num%2Cwifi_chip1_ssid2_access_sta_num%2Cwifi_chip2_ssid2_access_sta_num&multi_data=1"
             response = self.request_with_session('GET', cmd_url, headers=header)
             data = response.data.decode('utf-8')
-            # Update cookies
-            set_cookie_header = response.headers.get('Set-Cookie', '')
-            self.update_cookies(set_cookie_header)
             logger.info("Fetched ZTE info 2 successfully")
             return data
         except Exception as e:
@@ -587,21 +490,14 @@ class zteRouter:
 
     def zteinfo3(self):
         logger.debug("Fetching comprehensive ZTE info (zteinfo3) with hybrid splitting and fault tolerance")
-
         try:
-            # Step 1: Authenticate
-            LD = self.get_LD()
-            self.getCookie(username=self.username, password=self.password, LD=LD)
-
+            # Use authentication/session from instance
             header = {
                 "Host": self.ip,
                 "Referer": f"{self.referer}index.html",
             }
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
 
-            # Step 2: Parameter groups to fetch
+            # Step 3: Parameter groups to fetch
             param_groups = {
                 "system_info": (
                     "wa_inner_version,cr_version,loginfo,new_version_state,current_upgrade_state,"
@@ -667,7 +563,7 @@ class zteRouter:
                 )
             }
 
-            # Step 3: Prepare for chunked requests
+            # Step 4: Prepare for chunked requests
             combined_data = {}
             failed_groups = {}
             partial = False
@@ -688,7 +584,8 @@ class zteRouter:
                             raw_data = response.data.decode('utf-8')
                             parsed = json.loads(raw_data)
                             combined_data.update(parsed)
-                            logger.debug(f"✅ {group_name} (chunk {idx+1}) fetched with {len(parsed)} keys")
+                            empty_params = sum(1 for val in parsed.values() if val == "")
+                            logger.debug(f"✅ {group_name} (chunk {idx+1}) fetched with {len(parsed)} keys ({empty_params} empty)")
                             success = True
                             break
                         except Exception as ex:
@@ -699,11 +596,9 @@ class zteRouter:
                         failed_groups[f"{group_name}_chunk_{idx+1}"] = f"Failed after 3 attempts"
                         partial = True
 
-                    # Always update cookies
-                    if 'Set-Cookie' in response.headers:
-                        self.update_cookies(response.headers['Set-Cookie'])
+                    # No cookie update logic needed
 
-            # Step 4: Partial detection
+            # Step 5: Partial detection
             if partial:
                 logger.warning(f"⚠️ zteinfo3: Partial data returned; failed chunks: {list(failed_groups.keys())}")
                 combined_data["__partial"] = True
@@ -720,7 +615,6 @@ class zteRouter:
             logger.info("✅ Fetched ZTE info using hybrid strategy")
             return json.dumps(combined_data)
 
-
         except Exception as e:
             logger.error(f"❌ Critical failure in zteinfo3: {e}")
             return ""
@@ -729,23 +623,13 @@ class zteRouter:
         """
         Fetch ZTE modem info for both 'station_list' (WiFi) and 'lan_station_list' (LAN),
         tag each with type, and return a merged list under 'all_devices'.
-
-        Returns:
-            str: JSON string of the combined result, or empty string on error.
         """
         logger.debug("Fetching ZTE info: station_list and lan_station_list (tagged & merged)")
         try:
-            LD = self.get_LD()
-            self.getCookie(username=self.username, password=self.password, LD=LD)
-
             header = {
                 "Host": self.ip,
                 "Referer": f"{self.referer}index.html",
             }
-
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
 
             combined_data = {}
 
@@ -755,8 +639,7 @@ class zteRouter:
                 response = self.request_with_session('GET', url, headers=header)
                 raw_data = response.data.decode('utf-8')
 
-                set_cookie_header = response.headers.get('Set-Cookie', '')
-                self.update_cookies(set_cookie_header)
+                # No cookie update logic needed
 
                 try:
                     parsed = json.loads(raw_data)
@@ -785,23 +668,13 @@ class zteRouter:
     def ztesmsinfo(self):
         logger.debug("Fetching ZTE SMS info")
         try:
-            # Get LD and update cookies
-            LD = self.get_LD()
-            # getCookie will update self.cookies
-            self.getCookie(username=self.username, password=self.password, LD=LD)
             header = {
                 "Host": self.ip,
                 "Referer": f"{self.referer}index.html",
             }
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
             cmd_url = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&cmd=sms_capacity_info"
             response = self.request_with_session('GET', cmd_url, headers=header)
             data = response.data.decode('utf-8')
-            # Update cookies
-            set_cookie_header = response.headers.get('Set-Cookie', '')
-            self.update_cookies(set_cookie_header)
 
             # Parse the response JSON
             data_json = json.loads(data)
@@ -823,16 +696,8 @@ class zteRouter:
     def ztereboot(self):
         logger.debug("Rebooting ZTE router")
         try:
-            # Get LD and update cookies
-            LD = self.get_LD()
-            # getCookie will update self.cookies
-            self.getCookie(username=self.username, password=self.password, LD=LD)
-            # AD value
-            AD = self.get_AD()
+            AD = getattr(self, "_zte_auth_AD", None)
             header = {"Referer": self.referer}
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
             payload = {
                 'isTest': 'false',
                 'goformId': 'REBOOT_DEVICE',
@@ -850,16 +715,8 @@ class zteRouter:
     def deletesms(self, msg_id):
         logger.debug(f"Deleting SMS with ID: {msg_id}")
         try:
-            # Get LD and update cookies
-            LD = self.get_LD()
-            # getCookie will update self.cookies
-            self.getCookie(username=self.username, password=self.password, LD=LD)
-            # AD value
-            AD = self.get_AD()
+            AD = getattr(self, "_zte_auth_AD", None)
             header = {"Referer": self.referer}
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
             payload = {
                 'isTest': 'false',
                 'goformId': 'DELETE_SMS',
@@ -878,14 +735,7 @@ class zteRouter:
     def parsesms(self):
         logger.debug("Starting SMS parsing process")
         try:
-            LD = self.get_LD()
-            self.getCookie(username=self.username, password=self.password, LD=LD)
-
             header = {"Referer": self.referer}
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
-
             payload = {
                 'cmd': 'sms_data_total',
                 'page': '0',
@@ -894,33 +744,25 @@ class zteRouter:
                 'tags': '10',
                 'order_by': 'order by id desc'
             }
-
             encoded_payload = urllib.parse.urlencode(payload)
             url = self.referer + "goform/goform_get_cmd_process?" + encoded_payload
-
             r = self.request_with_session('GET', url, headers=header)
             response_text = r.data.decode('utf-8', errors='replace')
-
             logger.debug(f"Raw SMS response: {repr(response_text[:300])}...")  # Preview first 300 chars
-
             # Clean invalid characters
             sanitized_text = clean_control_chars(response_text)
             sanitized_text = sanitized_text.replace('HR�Telekom', 'HR Telekom')  # Specific fix
-
             try:
                 response_json = json.loads(sanitized_text)
             except json.JSONDecodeError as e:
                 logger.error(f"JSON decoding failed: {e}")
                 return ""
-
             # Ensure 'messages' exists and is a list
             if 'messages' not in response_json or not isinstance(response_json['messages'], list):
                 logger.warning("'messages' key is missing or invalid in SMS response; defaulting to empty list.")
                 response_json['messages'] = []
-
             messages = response_json['messages']
             logger.info(f"Fetched {len(messages)} SMS messages")
-
             decode_errors = 0
             for item in messages:
                 try:
@@ -930,10 +772,8 @@ class zteRouter:
                 except Exception as e:
                     logger.warning(f"Failed to decode SMS content: {e}")
                     decode_errors += 1
-
             if decode_errors:
                 logger.warning(f"{decode_errors} messages failed to decode cleanly.")
-
             # Return dummy message if no SMS exists
             if not messages:
                 dummy_message = {
@@ -949,10 +789,8 @@ class zteRouter:
                     'sms_class': '4'
                 }
                 response_json['messages'].append(dummy_message)
-
             logger.info("Parsed all SMS messages successfully")
             return json.dumps(response_json, indent=2)
-
         except Exception as e:
             logger.error(f"Failed to parse SMS: {e}")
             return ""
@@ -961,16 +799,8 @@ class zteRouter:
     def connect_data(self):
         logger.debug("Connecting to data network")
         try:
-            # Get LD and update cookies
-            LD = self.get_LD()
-            # getCookie will update self.cookies
-            self.getCookie(username=self.username, password=self.password, LD=LD)
-            # AD value
-            AD = self.get_AD()
+            AD = getattr(self, "_zte_auth_AD", None)
             header = {"Referer": self.referer}
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
             payload = {
                 'isTest': 'false',
                 'goformId': 'CONNECT_NETWORK',
@@ -988,16 +818,8 @@ class zteRouter:
     def disconnect_data(self):
         logger.debug("Disconnecting from data network")
         try:
-            # Get LD and update cookies
-            LD = self.get_LD()
-            # getCookie will update self.cookies
-            self.getCookie(username=self.username, password=self.password, LD=LD)
-            # AD value
-            AD = self.get_AD()
+            AD = getattr(self, "_zte_auth_AD", None)
             header = {"Referer": self.referer}
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
             payload = {
                 'isTest': 'false',
                 'goformId': 'DISCONNECT_NETWORK',
@@ -1015,20 +837,8 @@ class zteRouter:
     def setdata_mode(self, BearerPreference):
         logger.debug(f"Setting data mode with BearerPreference: {BearerPreference}")
         try:
-            # Get LD and update cookies
-            LD = self.get_LD()
-            self.getCookie(username=self.username, password=self.password, LD=LD)
-
-            # Get AD value
-            AD = self.get_AD()
-
-            # Build headers
+            AD = getattr(self, "_zte_auth_AD", None)
             header = {"Referer": self.referer}
-            cookie_header = self.build_cookie_header()
-            if cookie_header:
-                header['Cookie'] = cookie_header
-
-            # Prepare payload
             payload = {
                 'isTest': 'false',
                 'goformId': 'SET_BEARER_PREFERENCE',
@@ -1037,8 +847,6 @@ class zteRouter:
             }
             encoded_payload = urllib.parse.urlencode(payload)
             body = encoded_payload.encode('utf-8')
-
-            # Send request
             r = self.request_with_session('POST', self.referer + "goform/goform_set_cmd_process", headers=header, body=body)
             logger.info(f"Set data mode '{BearerPreference}' with status code: {r.status}")
             return r.status
@@ -1057,157 +865,114 @@ getsmstimeEncoded = urllib.parse.quote(getsmstime, safe="")
 #messageEncoded = gsm_encode(message)
 #outputmessage = messageEncoded.decode()
 
-
-
 if __name__ == "__main__":
     if len(sys.argv) < 4:
-        print("Usage: script.py ip password command [username] [phone_number] [message]")
+        print("Usage: script.py ip password command1[,command2,...] [username]")
         sys.exit(1)
 
     ip = sys.argv[1]
     password = sys.argv[2]
-    command = int(sys.argv[3])
-        # Only track real command as last_command (not diagnostics)
-    if command != 99:
-        session["last_command"] = command
+    commands = sys.argv[3].split(',')
+    print(f"Commands received: {commands}")
+    username = sys.argv[4] if len(sys.argv) > 4 else None
+    phone_number = sys.argv[5] if len(sys.argv) > 5 else None
+    message = sys.argv[6] if len(sys.argv) > 6 else None
 
-    # Initialize variables
-    username = None
-    phone_number = None
-    message = None
-
-    # Adjust argument parsing based on the command
-    if command == 8:
-        # Command to send SMS
-        if len(sys.argv) == 6:
-            # No username provided
-            username = None
-            phone_number = sys.argv[4]
-            message = sys.argv[5]
-        elif len(sys.argv) == 7:
-            # Username provided
-            username = sys.argv[4] if sys.argv[4] != "" else None
-            phone_number = sys.argv[5]
-            message = sys.argv[6]
-        else:
-            print("Invalid number of arguments for sending SMS")
-            sys.exit(1)
-    else:
-        # For other commands
-        if len(sys.argv) > 4:
-            username = sys.argv[4] if sys.argv[4] != "" else None
-
-    # Create a router instance
     zte = zteRouter(ip, username, password)
 
-    logger.info(f"Command: {command}, Username: {username}, Password: {password}")
+    # Single authentication before executing the commands
+    zte.authenticate()
 
-    try:
-        result = None  # Ensure result is initialized
-        if command == 1:
-            result = zte.zteinfo()
-            print(result)
-        elif command == 2:
-            result = zte.zteinfo2()
-            print(result)
-        elif command == 3:
-            result = zte.ztesmsinfo()
-            print(result)
-        elif command == 4:
-            result = zte.ztereboot()
-            print(result)
-        elif command == 5:
-            result = zte.parsesms()
-            if result:
-                data = json.loads(result)
-                ids = [msg['id'] for msg in data['messages']]
-                if ids:
-                    formatted_ids = ";".join(ids)
-                    logger.info(f"Deleting SMS messages with IDs: {formatted_ids}")
-                    result = zte.deletesms(formatted_ids)
-                    print(result)
+    results = {}
+
+    for command in commands:
+        try:
+            cmd_id = int(command)
+        except Exception:
+            results[command] = f"Invalid command: {command}"
+            continue
+        try:
+            if cmd_id == 1:
+                results[cmd_id] = json.loads(zte.zteinfo())
+            elif cmd_id == 2:
+                results[cmd_id] = json.loads(zte.zteinfo2())
+            elif cmd_id == 3:
+                results[cmd_id] = json.loads(zte.ztesmsinfo())
+            elif cmd_id == 4:
+                results[cmd_id] = zte.ztereboot()
+            elif cmd_id == 5:
+                result = zte.parsesms()
+                if result:
+                    data = json.loads(result)
+                    ids = [msg['id'] for msg in data.get('messages', [])]
+                    if ids:
+                        formatted_ids = ";".join(ids)
+                        logger.info(f"Deleting SMS messages with IDs: {formatted_ids}")
+                        result = zte.deletesms(formatted_ids)
+                        results[cmd_id] = {"deleted_ids": ids, "status": result}
+                    else:
+                        logger.info("No SMS in memory to delete")
+                        results[cmd_id] = {"deleted_ids": [], "status": "No SMS"}
                 else:
-                    logger.info("No SMS in memory")
-                    sys.exit(0)
-        elif command == 6:
-            result = zte.parsesms()
-            if result:
-                test = json.loads(result)
-                if test["messages"]:
-                    first_message = test["messages"][0]
-                    first_message_json = json.dumps(first_message)
-                    print(first_message_json)
+                    logger.warning("Failed to parse SMS for deletion")
+                    results[cmd_id] = {"error": "parsesms() returned empty or invalid data"}
+            elif cmd_id == 6:
+                result = zte.parsesms()
+                if result:
+                    data = json.loads(result)
+                    messages = data.get("messages", [])
+                    if messages:
+                        first_message = messages[0]
+                        results[cmd_id] = first_message
+                    else:
+                        dummy_message = {
+                            'id': '999',
+                            'number': 'DUMMY',
+                            'content': 'NO SMS IN MEMORY',
+                            'tag': '1',
+                            'date': '24,07,18,09,39,05,+8',
+                            'draft_group_id': '',
+                            'received_all_concat_sms': '1',
+                            'concat_sms_total': '0',
+                            'concat_sms_received': '0',
+                            'sms_class': '4'
+                        }
+                        results[cmd_id] = dummy_message
                 else:
-                    dummy_message = {
-                        'id': '999',
-                        'number': 'DUMMY',
-                        'content': 'NO SMS IN MEMORY',
-                        'tag': '1',
-                        'date': '24,07,18,09,39,05,+8',
-                        'draft_group_id': '',
-                        'received_all_concat_sms': '1',
-                        'concat_sms_total': '0',
-                        'concat_sms_received': '0',
-                        'sms_class': '4'
-                    }
-                    print(json.dumps(dummy_message))
-                    sys.exit(0)
-        elif command == 7:
-            result = zte.zteinfo3()
-            print(result)
-        elif command == 8:
-            if phone_number and message:
-                logger.info(f"Sending SMS to {phone_number} with message: {message}")
-                result = zte.sendsms(phone_number, message)
-                print(result)
+                    logger.warning("Failed to parse SMS data for reading")
+                    results[cmd_id] = {"error": "parsesms() returned empty or invalid data"}
+            elif cmd_id == 7:
+                results[cmd_id] = json.loads(zte.zteinfo3())
+            elif cmd_id == 8:
+                if len(commands) > 1:
+                    results[cmd_id] = "SMS sending not supported in multi-command mode."
+                else:
+                    if phone_number and message:
+                        logger.info(f"Sending SMS to {phone_number} with message: {message}")
+                        result = zte.sendsms(phone_number, message)
+                        results[cmd_id] = result
+                    else:
+                        logger.error(f"Phone number or message not provided. Phone: {phone_number}, Message: {message}")
+                        results[cmd_id] = "Phone number or message not provided for sending SMS"
+            elif cmd_id == 9:
+                results[cmd_id] = zte.connect_data()
+            elif cmd_id == 10:
+                results[cmd_id] = zte.disconnect_data()
+            elif cmd_id == 11:
+                results[cmd_id] = zte.setdata_mode("Only_LTE")
+            elif cmd_id == 12:
+                results[cmd_id] = zte.setdata_mode("4G_AND_5G")
+            elif cmd_id == 13:
+                results[cmd_id] = zte.setdata_mode("LTE_AND_5G")
+            elif cmd_id == 14:
+                results[cmd_id] = zte.setdata_mode("Only_5G")
+            elif cmd_id == 15:
+                results[cmd_id] = zte.setdata_mode("WL_AND_5G")
+            elif cmd_id == 16:
+                results[cmd_id] = json.loads(zte.zteinfo4())
             else:
-                logger.error(f"Phone number or message not provided. Phone number: {phone_number}, Message: {message}")
-                print("Phone number or message not provided for sending SMS")
-                sys.exit(1)
-        elif command == 9:
-            result = zte.connect_data()
-            print(result)
-        elif command == 10:
-            result = zte.disconnect_data()
-            print(result)
-        elif command == 11:
-            result = zte.setdata_mode("Only_LTE")
-            print(result)
-        elif command == 12:
-            result = zte.setdata_mode("4G_AND_5G")
-            print(result)
-        elif command == 13:
-            result = zte.setdata_mode("LTE_AND_5G")
-            print(result)
-        elif command == 14:
-            result = zte.setdata_mode("Only_5G")
-            print(result)
-        elif command == 15:
-            result = zte.setdata_mode("WL_AND_5G")
-        elif command == 16:
-            result = zte.zteinfo4()
-            print(result)
-        elif command == 99:
-            diagnostics = {
-                "runtime_started": session.get("created"),
-                "last_latency_ms": session.get("last_latency_ms", 0),
-                "total_http_requests": session.get("total_requests", 0),
-                "last_error": session.get("last_error", "None"),
-                "command_success": session.get("last_successful_cmd", "None"),
-                "router_ip": ip,
-            }
-            print(json.dumps(diagnostics, indent=2))
-            sys.exit(0)
+                results[cmd_id] = f"Invalid command: {cmd_id}"
+        except Exception as e:
+            results[cmd_id] = f"Error: {e}"
 
-        # ✅ Track last successful command if applicable
-        if command != 99 and result is not None:
-            session["last_successful_cmd"] = command
-        # ❌ Fallback if command is not recognized
-        if result is None:
-            print(f"Invalid command: {command}")
-            sys.exit(1)
-
-    except Exception as e:
-        logger.error(f"An error occurred: {e}")
-        session["last_error"] = str(e)
-        sys.exit(1)
+    print(json.dumps(results, indent=2))

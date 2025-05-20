@@ -33,31 +33,27 @@ def guard_stale_data(update_func):
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
+    _LOGGER.info("Setting up ZTE Router integration")
+    
+    # Hole die existierenden Coordinators aus hass.data
+    coordinators = hass.data[DOMAIN][entry.entry_id]
+    coordinator = coordinators["coordinator"]
+    sms_coordinator = coordinators["sms_coordinator"]
+
+    config = {**entry.data, **entry.options}
+    router_type = entry.data.get("router_type", "MC801A")
+    enable_flux = config.get("enable_flux_sensors", True)
+
+    # Extract required config values
     ip = entry.data["router_ip"]
     pwd = entry.data["router_password"]
     user = entry.data.get("router_username", "")
-    router_type = entry.data.get("router_type", "MC801A")
-    ping_interval = entry.data.get("ping_interval", 60)
-    sms_check_interval = entry.data.get("sms_check_interval", 100)
-    config = {**entry.data, **entry.options}
-    enable_flux = config.get("enable_flux_sensors", True)
-    allow_stale_data = config.get("allow_stale_data", DEFAULT_ALLOW_STALE_DATA)
+    sms_check_interval = config.get("sms_check_interval", 100)
 
-    # Device-specific disabled sensors
     disabled_sensors = {
         "MC889": DISABLED_SENSORS_MC889,
         "MC888": DISABLED_SENSORS_MC888
     }.get(router_type, DISABLED_SENSORS_MC801A)
-
-    # Start coordinator
-    coordinator = ZTERouterDataUpdateCoordinator(
-        hass, config["router_ip"], config["router_password"],
-        user, ping_interval, allow_stale_data
-    )
-    await coordinator.async_config_entry_first_refresh()
-
-    if not coordinator.last_update_success:
-        raise PlatformNotReady
 
     sensors = []
     handled_keys = set()
@@ -75,22 +71,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         ConnectionUptimeSensor(coordinator),
         ZTESessionDiagnosticsSensor(coordinator),
     ])
-    handled_keys.update([
-        "station_list", "lan_station_list", "all_devices"
-    ])
+    handled_keys.update(["station_list", "lan_station_list", "all_devices"])
 
-    # Create and store the SMS coordinator
+    # Create and store the SMS coordinator (if not already created)
     sms_coordinator = ZTERouterSMSUpdateCoordinator(hass, ip, pwd, user, sms_check_interval)
     await sms_coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id]["sms_coordinator"] = sms_coordinator
 
-
     # SMS Sensor
-    sms_coordinator = hass.data[DOMAIN][entry.entry_id]["sms_coordinator"]
-    sms_data = sms_coordinator.data.get("sms_data", {})
-    sensors.append(LastSMSSensor(sms_coordinator, sms_data))
+    sms_data = sms_coordinator.data.get("sms_data", {}) or {}
+    sensors.append(LastSMSSensor(sms_coordinator, sms_data, disabled_sensors.get("last_sms", False)))
 
-    # FLUX Sensors
+
+    # FLUX Sensors (bleibt wie bisher)
     registry = async_get(hass)
     if enable_flux:
         for key in FLUX_KEYS:
@@ -106,19 +99,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         # Clean up previously created FLUX sensors if they're now disabled
         entity_ids = list(registry.entities.keys())
         for key in FLUX_KEYS:
-            unique_id = f"{DOMAIN}_{ip}_stat_{key}"
+            unique_id = f"{DOMAIN}_{entry.data['router_ip']}_stat_{key}"
             for eid in entity_ids:
                 entity = registry.entities.get(eid)
                 if entity and entity.unique_id == unique_id:
                     registry.async_remove(eid)
 
-    # Filter out specific internal diagnostic keys from becoming sensors
+    # Weiterer Sensor-Setup-Code unverändert...
     diagnostic_keys_to_skip = {
         "session_created", "session_expires_in", "last_command",
         "last_successful_cmd", "last_error", "total_requests", "fetch_latency_ms"
     }
 
-    # Fallback for unhandled keys — add remaining sensors
     for key, value in coordinator.data.items():
         if (
             key in handled_keys or
@@ -132,7 +124,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         sensors.append(ZTERouterSensor(coordinator, name, key, disabled_sensors.get(key, False)))
         handled_keys.add(key)
 
-    async_add_entities(sensors, True)
+    async_add_entities(sensors, False)
 
 
 def extract_json(output):
@@ -148,29 +140,39 @@ class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
         self.username_entry = user
         self._data = {}
         self.allow_stale_data = allow_stale_data
+        _LOGGER.info(f"Initializing ZTERouterDataUpdateCoordinator with Ping check interval: {interval} seconds")
         super().__init__(
             hass, _LOGGER, name="zte_router", update_interval=timedelta(seconds=interval)
         )
 
     async def _async_update_data(self):
+        _LOGGER.info("Starting _async_update_data in ZTERouterDataUpdateCoordinator at %s", datetime.now())
         new_data = {}
-        keys = {3: "dynamic_data", 7: "status_data", 16: "client_data", 99: "diag_data"}
-        for cmd, label in keys.items():
-            try:
-                raw = await self.hass.async_add_executor_job(
-                    self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, cmd
-                )
-                parsed = json.loads(extract_json(raw))
-                if parsed:
-                    new_data[label] = parsed
-                    new_data.update(parsed)
-                else:
-                    _LOGGER.warning(f"[ZTE] Empty response for command {cmd} ({label}), skipping.")
-            except Exception as e:
-                _LOGGER.error(f"[ZTE] Failed command {cmd} ({label}): {e}")
-                if not self.allow_stale_data:
-                    raise UpdateFailed(f"[ZTE] Critical failure on command {cmd}: {e}")
-                _LOGGER.warning(f"[ZTE] Allowing stale data due to error: {e}")
+        keys = {3: "dynamic_data", 7: "status_data", 16: "client_data"}
+        cmds = ','.join(map(str, keys.keys()))
+
+        try:
+            raw = await self.hass.async_add_executor_job(
+                self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, cmds
+            )
+            parsed = json.loads(extract_json(raw))
+            #_LOGGER.warning(f"_____DATA {parsed}")
+            if parsed:
+                for cmd, label in keys.items():
+                    cmd_str = str(cmd)
+                    cmd_data = parsed.get(cmd_str, {})
+                    if isinstance(cmd_data, dict):
+                        new_data[label] = cmd_data
+                        new_data.update(cmd_data)
+                    else:
+                        _LOGGER.warning(f"Unexpected cmd_data format for command {cmd}: {cmd_data}")
+            else:
+                _LOGGER.warning("[ZTE] Empty overall response, no data parsed.")
+        except Exception as e:
+            _LOGGER.error(f"[ZTE] Failed to fetch data: {e}")
+            if not self.allow_stale_data:
+                raise UpdateFailed(f"[ZTE] Critical failure fetching data: {e}")
+            _LOGGER.warning(f"[ZTE] Allowing stale data due to error: {e}")
 
         if not new_data and not self.allow_stale_data:
             raise UpdateFailed("[ZTE] No valid data obtained from router.")
@@ -182,6 +184,7 @@ class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
     def run_mc_script(self, ip, pwd, user, cmd, retries=3, delay=2):
         attempt = 0
         while attempt < retries:
+            #_LOGGER.warning(f"Fetching data attempt: {attempt}, cmd: {cmd}")
             try:
                 cmdline = ["python3", "/config/custom_components/zte_router/mc.py", str(ip), str(pwd), str(cmd), str(user or "")]
                 result = subprocess.run(cmdline, capture_output=True, text=True, check=True)
@@ -195,10 +198,8 @@ class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
                     raise e
 
 class ZTERouterSMSUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, ip_entry, password_entry, username_entry, sms_check_interval):
-        # In ZTERouterSMSUpdateCoordinator.__init__
-        self._listeners = set()
-        self.ip_entry = ip_entry
+    def __init__(self, hass, ip, password_entry, username_entry, sms_check_interval):
+        self.ip_entry = ip
         self.password_entry = password_entry
         self.username_entry = username_entry if username_entry else ""
         self._data = {}
@@ -211,20 +212,35 @@ class ZTERouterSMSUpdateCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self):
-        _LOGGER.info("Starting _async_update_data in SMSUpdateCoordinator at %s", datetime.now())
+        _LOGGER.info("Starting _async_update_data in ZTERouterSMSUpdateCoordinator at %s", datetime.now())
+        new_data = {}
+        keys = {6: "sms_data"}
+        cmds = ','.join(map(str, keys.keys()))
+
         try:
-            # Offload the blocking function to a thread
-            data = await self.hass.async_add_executor_job(
-                self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, 6
+            raw = await self.hass.async_add_executor_job(
+                self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, cmds
             )
-            _LOGGER.debug(f"SMS data received from mc.py script: {data}")
-            json_data = extract_json(data)
-            parsed = json.loads(json_data)
-            self._data = {"sms_data": parsed}
-            return self._data
+            parsed = json.loads(extract_json(raw))
+            _LOGGER.debug(f"SMS parsed data: {parsed}")
+            if parsed:
+                for cmd, label in keys.items():
+                    cmd_str = str(cmd)
+                    cmd_data = parsed.get(cmd_str, {})
+                    if isinstance(cmd_data, dict):
+                        new_data[label] = cmd_data
+                        new_data.update(cmd_data)
+                    else:
+                        _LOGGER.warning(f"Unexpected cmd_data format for command {cmd}: {cmd_data}")
+
+                self._data.update(new_data)
+            else:
+                _LOGGER.warning("SMS coordinator received empty data.")
+
         except Exception as err:
             _LOGGER.error(f"Error during _async_update_data (SMS): {err}")
-            return self._data
+
+        return self._data
 
     def run_mc_script(self, ip, password, username, command):
         _LOGGER.info(f"Running mc.py script for SMS command {command}")
@@ -476,12 +492,24 @@ class LastSMSSensor(ZTERouterEntity):
     def __init__(self, coordinator, sms_data, disabled_by_default=False):
         self.coordinator = coordinator
         self._name = "Last SMS"
-        self._state = sms_data.get("id", "NO DATA")  # Set the state to the SMS ID
-        self._attributes = {k: v for k, v in sms_data.items() if k != "id"}  # Store all other attributes except the ID
-        self._attributes["content"] = sms_data.get("content", "NO CONTENT")  # Move content to attributes
+
+        # Gracefully handle missing or incomplete sms_data
+        self._state = sms_data.get("id", None)  # Show as None if no ID yet
+        self._attributes = {}
+
+        # Copy all valid keys except "id" to attributes
+        if sms_data:
+            self._attributes = {k: v for k, v in sms_data.items() if k != "id"}
+            self._attributes["content"] = sms_data.get("content", "NO CONTENT")
+            if "date" in self._attributes:
+                self._attributes["formatted_date"] = self.format_date(self._attributes["date"])
+        else:
+            self._attributes["content"] = "NO CONTENT"
+
         self.entity_registry_enabled_default = not disabled_by_default
         self._attr_should_poll = False  # Disable default polling
         _LOGGER.info(f"Initializing Last SMS sensor with state: {self._state} (SMS ID)")
+
 
         # Parse and format the date attribute
         if "date" in self._attributes:
