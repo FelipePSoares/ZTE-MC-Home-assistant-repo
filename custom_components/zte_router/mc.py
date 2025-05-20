@@ -1,6 +1,5 @@
 import hashlib
 from datetime import datetime, timedelta
-import binascii
 import json
 import sys
 import os
@@ -15,7 +14,6 @@ import socket
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 import re
-import atexit  # <-- Added for auto cleanup
 from pygsm7 import encodeMessage, decodeMessage
 import traceback  # <-- add this at the top if not already
 from logging.handlers import TimedRotatingFileHandler
@@ -129,98 +127,18 @@ def hex2utf(string):
 class zteRouter:
     def __init__(self, ip, username, password):
         self.ip = ip
-        self.protocol = "http"
+        self.protocol = "http"  # default to http
         self.username = username
         self.password = password
-        self.cookies = {}
+        self.cookies = {}  # Existing cookie management
         self.stok = None
-        self.session_expiry = datetime.min
-        self.uses_stok = False
+        self.session_expiry = datetime.min  # Initialize expiry in the past
         logger.info(f"Initializing ZTE Router with IP {ip}, Username: {username}, Password: {password}")
-
         self.try_set_protocol()
         self.referer = f"{self.protocol}://{self.ip}/"
 
-        ld = self.get_LD()
-        self.session_id = ld if ld else self.ip.replace(".", "_")
-
-        self.SESSION_FILE = os.path.join("/tmp", f"zte_session_{self.session_id}.json")
-        logger.info(f"Using session ID: {self.session_id}")
-        logger.info(f"Session file path: {self.SESSION_FILE}")
-    
-        # Register cleanup function
-        atexit.register(self.cleanup_files)
-
-        self.SESSION_FILE = os.path.join("/tmp", f"zte_session_{self.session_id}.json")
     CERT_FILE = "/tmp/zte_router_cert.pem"
 
-    def cleanup_files(self):
-        if os.path.exists(self.SESSION_FILE):
-            try:
-                with open(self.SESSION_FILE, 'r') as f:
-                    session_data = json.load(f)
-                    expiry = datetime.fromisoformat(session_data.get("session_expiry"))
-                    if datetime.now() > expiry:
-                        os.remove(self.SESSION_FILE)
-                        logger.info(f"Cleaned up expired session file: {self.SESSION_FILE}")
-                    else:
-                        logger.info("Session still valid, skipping cleanup.")
-            except Exception as e:
-                logger.warning(f"Failed to evaluate or clean session file: {e}")
-
-    
-    def save_session(self):
-        session_data = {
-            'stok': self.stok,
-            'session_expiry': self.session_expiry.isoformat(),
-            'cookies': self.cookies,
-            # Persist full session state
-            'last_command': session.get("last_command"),
-            'last_successful_cmd': session.get("last_successful_cmd"),
-            'last_error': session.get("last_error"),
-            'total_requests': session.get("total_requests"),
-            'last_latency_ms': session.get("last_latency_ms"),
-            'session_created': session.get("created"),
-            'expires_in': session.get("expires_in"),
-            'session_uses_stok': self.uses_stok,
-        }
-        with open(self.SESSION_FILE, 'w') as f:
-            json.dump(session_data, f, indent=2)
-        logger.info("📝 Session saved to disk:")
-        logger.debug(json.dumps(session_data, indent=2))
-
-
-    def load_session(self):
-        if os.path.exists(self.SESSION_FILE):
-            with open(self.SESSION_FILE, 'r') as f:
-                session_data = json.load(f)
-                self.stok = session_data.get('stok')
-                self.cookies = session_data.get('cookies', {})
-                self.session_expiry = datetime.fromisoformat(session_data['session_expiry'])
-                self.uses_stok = session_data.get("session_uses_stok", False)
-
-
-                # Restore extended session state
-                session["last_command"] = session_data.get("last_command")
-                session["last_successful_cmd"] = session_data.get("last_successful_cmd")
-                session["last_error"] = session_data.get("last_error")
-                session["total_requests"] = session_data.get("total_requests", 0)
-                session["last_latency_ms"] = session_data.get("last_latency_ms", 0)
-                session["created"] = session_data.get("session_created", datetime.now().isoformat())
-                session["expires_in"] = session_data.get("expires_in", "N/A")
-
-                logger.info("📦 Session loaded from disk:")
-                logger.debug(json.dumps(session_data, indent=2))
-
-                remaining = self.session_expiry - datetime.now()
-                logger.info(f"⏳ Session expires in: {remaining.total_seconds() / 60:.2f} minutes")
-        else:
-            logger.info("⚠️ No existing session file found.")
-
-
-    def is_session_valid(self):
-        return datetime.now() < self.session_expiry and (not self.uses_stok or self.stok is not None)
-    
     def invalidate_session(self):
         logger.info("Invalidating session cookie")
         self.stok = None
@@ -438,16 +356,12 @@ class zteRouter:
 
     def getCookie(self, username, password, LD):
         logger.debug(f"Getting cookie for username: {username}, password: {password}, LD: {LD}")
-
-        self.load_session()
-        if self.is_session_valid() and 'stok' in self.cookies:
-            remaining = self.session_expiry - datetime.now()
-            logger.info(f"🟢 Reusing session: stok={self.stok}")
-            logger.info(f"Session valid for another {remaining.total_seconds() / 60:.1f} minutes")
-            session["expires_in"] = f"{int(remaining.total_seconds() / 60)} min"
+        if self.stok is not None and datetime.now() < self.session_expiry:
+            logger.info(f"🟢 Reusing in-memory session: stok={self.stok}")
             return self.stok
         else:
-            logger.warning("🔄 Session not valid or missing 'stok' — performing fresh login")
+            logger.info("🔄 No valid session in memory, performing fresh login")
+
 
         header = {"Referer": self.referer}
         cookie_header = self.build_cookie_header()
@@ -486,20 +400,14 @@ class zteRouter:
             self.update_cookies(set_cookie_header)
 
             stok = self.cookies.get('stok')
-            if stok:
-                self.uses_stok = True
-                self.stok = stok
-                logger.info(f"🔐 Router uses stok: {stok}")
-            else:
-                self.uses_stok = False
-                self.stok = None
-                logger.info("🔓 Router does NOT use stok (cookie-based only login)")
+            if not stok:
+                logger.error("Failed to obtain a valid cookie from the router")
+                raise ValueError("Failed to obtain a valid cookie from the router")
 
             # Set session expiry (e.g., valid for 60 minutes)
             self.session_expiry = datetime.now() + timedelta(minutes=1)
             session["expires_in"] = f"{int((self.session_expiry - datetime.now()).total_seconds() / 60)} min"
             self.stok = stok
-            self.save_session()
             logger.info(f"Obtained new session cookie: stok={stok}")
             return stok
 
@@ -1280,16 +1188,13 @@ if __name__ == "__main__":
             result = zte.zteinfo4()
             print(result)
         elif command == 99:
-            # ✅ Explicitly load session before printing diagnostics
-            zte.load_session()
             diagnostics = {
-                "session_created": session.get("created"),
-                "session_expires_in": session.get("expires_in"),
-                "last_command": session.get("last_command", "Unknown"),
-                "last_successful_cmd": session.get("last_successful_cmd", "Unknown"),
-                "last_error": session.get("last_error", "Unknown"),
-                "total_requests": session.get("total_requests", 0),
-                "fetch_latency_ms": session.get("last_latency_ms", 0),
+                "runtime_started": session.get("created"),
+                "last_latency_ms": session.get("last_latency_ms", 0),
+                "total_http_requests": session.get("total_requests", 0),
+                "last_error": session.get("last_error", "None"),
+                "command_success": session.get("last_successful_cmd", "None"),
+                "router_ip": ip,
             }
             print(json.dumps(diagnostics, indent=2))
             sys.exit(0)
@@ -1297,8 +1202,6 @@ if __name__ == "__main__":
         # ✅ Track last successful command if applicable
         if command != 99 and result is not None:
             session["last_successful_cmd"] = command
-            zte.save_session()  # 💾 Save updated session to disk!
-
         # ❌ Fallback if command is not recognized
         if result is None:
             print(f"Invalid command: {command}")
@@ -1307,5 +1210,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"An error occurred: {e}")
         session["last_error"] = str(e)
-        zte.save_session()
         sys.exit(1)

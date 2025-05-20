@@ -79,10 +79,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         "station_list", "lan_station_list", "all_devices"
     ])
 
+    # Create and store the SMS coordinator
+    sms_coordinator = ZTERouterSMSUpdateCoordinator(hass, ip, pwd, user, sms_check_interval)
+    await sms_coordinator.async_config_entry_first_refresh()
+    hass.data[DOMAIN][entry.entry_id]["sms_coordinator"] = sms_coordinator
+
+
     # SMS Sensor
-    sms_data = coordinator.data.get("sms_data", {})
-    if "content" in sms_data:
-        sensors.append(LastSMSSensor(coordinator, sms_data, disabled_sensors.get("last_sms", False)))
+    sms_coordinator = hass.data[DOMAIN][entry.entry_id]["sms_coordinator"]
+    sms_data = sms_coordinator.data.get("sms_data", {})
+    sensors.append(LastSMSSensor(sms_coordinator, sms_data))
 
     # FLUX Sensors
     registry = async_get(hass)
@@ -148,7 +154,7 @@ class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self):
         new_data = {}
-        keys = {3: "dynamic_data", 6: "sms_data", 7: "status_data", 16: "client_data", 99: "diag_data"}
+        keys = {3: "dynamic_data", 7: "status_data", 16: "client_data", 99: "diag_data"}
         for cmd, label in keys.items():
             try:
                 raw = await self.hass.async_add_executor_job(
@@ -190,6 +196,8 @@ class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
 
 class ZTERouterSMSUpdateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass, ip_entry, password_entry, username_entry, sms_check_interval):
+        # In ZTERouterSMSUpdateCoordinator.__init__
+        self._listeners = set()
         self.ip_entry = ip_entry
         self.password_entry = password_entry
         self.username_entry = username_entry if username_entry else ""
@@ -211,7 +219,8 @@ class ZTERouterSMSUpdateCoordinator(DataUpdateCoordinator):
             )
             _LOGGER.debug(f"SMS data received from mc.py script: {data}")
             json_data = extract_json(data)
-            self._data.update(json.loads(json_data))
+            parsed = json.loads(json_data)
+            self._data = {"sms_data": parsed}
             return self._data
         except Exception as err:
             _LOGGER.error(f"Error during _async_update_data (SMS): {err}")
