@@ -69,7 +69,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         monthly_rx_gb(coordinator),
         DataLeftSensor(coordinator),
         ConnectionUptimeSensor(coordinator),
-        ZTESessionDiagnosticsSensor(coordinator),
     ])
     handled_keys.update(["station_list", "lan_station_list", "all_devices"])
 
@@ -298,78 +297,6 @@ class ZTERouterEntity(RestoreEntity, Entity):
     def extra_state_attributes(self):
         # Only return attributes if self._attributes is defined
         return getattr(self, "_attributes", {})
-
-class ZTESessionDiagnosticsSensor(ZTERouterEntity):
-    def __init__(self, coordinator):
-        self.coordinator = coordinator
-        self._name = "Session Diagnostics"
-        self._state = None
-        self._attributes = {}
-        self.entity_registry_enabled_default = True
-        self._attr_is_diagnostics = True
-        self._attr_should_poll = False
-        self._state = "Unavailable" if not self.coordinator.last_update_success else "OK"
-        _LOGGER.info("Initializing Session Diagnostics sensor")
-
-    @property
-    def name(self):
-        return self._name
-
-    @property
-    def state(self):
-        return self._state or "Unknown"
-
-    @property
-    def unique_id(self):
-        return f"{DOMAIN}_{self.coordinator.ip_entry}_session_diagnostics"
-
-    @property
-    def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, f"{DOMAIN}_{self.coordinator.ip_entry}")},
-            "name": self.coordinator.ip_entry,
-            "manufacturer": MANUFACTURER,
-            "model": MODEL,
-        }
-
-    @property
-    def is_diagnostics(self):
-        return True
-
-    @property
-    def entity_category(self):
-        return EntityCategory.DIAGNOSTIC
-
-    @property
-    def extra_state_attributes(self):
-        return self._attributes
-
-    async def async_update(self):
-        _LOGGER.info("Manual update requested for Session Diagnostics sensor")
-        await self.coordinator.async_request_refresh()
-
-    @guard_stale_data
-    async def async_handle_coordinator_update(self):
-        output = await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.run_mc_script,
-            self.coordinator.ip_entry,
-            self.coordinator.password_entry,
-            self.coordinator.username_entry,
-            99  # Your diagnostic command
-        )
-
-        try:
-            data = json.loads(extract_json(output))
-            self._state = "OK" if data else "Unavailable"
-            self._attributes = data
-            _LOGGER.info(f"Session Diagnostics sensor updated: {data}")
-        except Exception as e:
-            _LOGGER.warning(f"Failed to parse session diagnostics output: {e}")
-            self._state = "Error"
-            self._attributes = {}
-
-        self.async_write_ha_state()
-
 
 class ZTERouterSensor(ZTERouterEntity):
     def __init__(self, coordinator, name, key, disabled_by_default=False):
