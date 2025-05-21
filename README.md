@@ -93,3 +93,7 @@ To install beta versions from HACS:
 
 ## Contributors
 If u have any suggestion, or you are doing pull requests and adding new features, increment the version number by 1 in manifest.json, so that GitHub automation automatically creates a new release.
+
+🙏 Special Thanks
+
+Huge thanks to @rosenrot00 for helping rewrite major portions of the code and improving overall quality!
