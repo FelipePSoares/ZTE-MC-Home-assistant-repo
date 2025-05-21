@@ -242,7 +242,7 @@ class ZTERouterSMSUpdateCoordinator(DataUpdateCoordinator):
         return self._data
 
     def run_mc_script(self, ip, password, username, command):
-        _LOGGER.info(f"Running mc.py script for SMS command {command}")
+        #_LOGGER.info(f"Running mc.py script for SMS command {command}")
         try:
             # Ensure username is a string; use an empty string if None
             username = username or ""
@@ -254,6 +254,17 @@ class ZTERouterSMSUpdateCoordinator(DataUpdateCoordinator):
                 str(command),
                 username  # Include username if applicable
             ]
+            # Mask only the password for logging
+            def mask_command(cmd, sensitive_indices):
+                masked = cmd.copy()
+                for i in sensitive_indices:
+                    if 0 <= i < len(masked):
+                        masked[i] = "*****"
+                return masked
+
+            masked_cmd = mask_command(cmd, [3])
+            _LOGGER.info("Executing command: %s", masked_cmd)
+
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             _LOGGER.debug(f"Output for SMS command {command}: {result.stdout}")
             return result.stdout
@@ -918,17 +929,40 @@ class DataLeftSensor(ZTERouterEntity):
     @guard_stale_data
     async def async_handle_coordinator_update(self):
         old_state = self._state
-        if self.coordinator.data:
-            monthly_usage = float(self.hass.states.get("sensor.monthly_usage").state or 0)
-            # Use the configurable threshold from the options
-            threshold = self.coordinator.config_entry.options.get("monthly_usage_threshold", 200)
-            data_left = threshold - monthly_usage if monthly_usage < threshold else 50 - (monthly_usage % 50)
+        threshold = self.coordinator.config_entry.options.get("monthly_usage_threshold", 200)
+
+        try:
+            use_flux = "flux_monthly_tx_bytes" in self.coordinator.data and "flux_monthly_rx_bytes" in self.coordinator.data
+            if use_flux:
+                tx_bytes = float(self.coordinator.data.get("flux_monthly_tx_bytes") or 0)
+                rx_bytes = float(self.coordinator.data.get("flux_monthly_rx_bytes") or 0)
+            else:
+                tx_bytes = float(self.coordinator.data.get("monthly_tx_bytes") or 0)
+                rx_bytes = float(self.coordinator.data.get("monthly_rx_bytes") or 0)
+
+            usage_gb = (tx_bytes + rx_bytes) / 1024 / 1024 / 1024
+
+            # Standard logic
+            if usage_gb < threshold:
+                data_left = threshold - usage_gb
+            else:
+                data_left = 50 - (usage_gb % 50)
+
             self._state = round(data_left, 2)
-            _LOGGER.info(f"Data Left sensor updated. Old state: {old_state}, New state: {self._state}")
-        else:
-            _LOGGER.warning("Data Left sensor: No valid data or update failed. Setting state to Unavailable")
+            _LOGGER.info(f"Data Left sensor updated. Old state: {old_state}, New state: {self._state} (Using FLUX: {use_flux})")
+
+        except Exception as e:
+            _LOGGER.warning(f"Failed to calculate Data Left: {e}")
             self._state = None
+        
+        self._attributes = {
+            "usage_source": "FLUX" if use_flux else "NATIVE",
+            "used_gb": round(usage_gb, 2),
+            "threshold_gb": threshold
+        }
+
         self.async_write_ha_state()
+
 
 class ConnectionUptimeSensor(ZTERouterEntity):
     def __init__(self, coordinator):
@@ -1380,8 +1414,6 @@ class ZTEFluxTotalUsageSensor(ZTEFluxSensor):
         except Exception as e:
             _LOGGER.warning(f"[FLUX] Total Usage calculation failed: {e}")
             return None
-
-
 
     @property
     def unique_id(self):
