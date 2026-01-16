@@ -2,7 +2,14 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 import voluptuous as vol
 
-from .const import DOMAIN, DEFAULT_USERNAME,CONF_ALLOW_STALE_DATA, DEFAULT_ALLOW_STALE_DATA
+from .const import (
+    DOMAIN,
+    DEFAULT_USERNAME,
+    CONF_ALLOW_STALE_DATA,
+    DEFAULT_ALLOW_STALE_DATA,
+    SUPPORTED_ROUTER_TYPES,
+    ROUTER_TYPE_MC801,
+)
 
 
 class ZTERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -24,9 +31,7 @@ class ZTERouterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_config()
 
         model_schema = vol.Schema({
-            vol.Required("router_type", default="MC801"): vol.In([
-                "MC801", "MC888", "MC889"
-            ]),
+            vol.Required("router_type", default=ROUTER_TYPE_MC801): vol.In(SUPPORTED_ROUTER_TYPES),
             vol.Optional("has_username", default=False): bool,
         })
 

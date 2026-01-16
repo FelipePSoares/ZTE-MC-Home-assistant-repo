@@ -1,0 +1,34 @@
+﻿ubus_call:
+  name: Call G5 Ultra ubus method
+  description: Execute a ubus module/method on a configured G5 Ultra router entry.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Specific config entry ID when multiple routers are configured.
+      example: 1234567890abcdef1234567890abcdef
+      required: false
+      selector:
+        text:
+    module:
+      name: Module
+      description: Ubus object (module) name to invoke.
+      example: zwrt_wlan
+      required: true
+      selector:
+        text:
+    method:
+      name: Method
+      description: Method/function to call within the module.
+      example: iface_report
+      required: true
+      selector:
+        text:
+    params:
+      name: Parameters
+      description: Optional JSON dictionary passed as params.
+      example:
+        source_module: web
+        cid: 1
+      required: false
+      selector:
+        object:

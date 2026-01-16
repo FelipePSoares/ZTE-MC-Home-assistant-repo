@@ -1,18 +1,42 @@
 import logging
-import yaml
 import os
+
+import voluptuous as vol
+import yaml
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device_registry import async_get as async_get_device_registry
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
-from .const import DOMAIN, MANUFACTURER, MODEL,CONF_ALLOW_STALE_DATA, DEFAULT_ALLOW_STALE_DATA
+from .const import (
+    DOMAIN,
+    MANUFACTURER,
+    MODEL,
+    CONF_ALLOW_STALE_DATA,
+    DEFAULT_ALLOW_STALE_DATA,
+    ROUTER_TYPE_MC801,
+    ROUTER_TYPE_G5_ULTRA,
+)
+from .g5_ultra_client import G5UltraRouterRunner
 from .sensor import ZTERouterDataUpdateCoordinator, ZTERouterSMSUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+SERVICE_UBUS_CALL = "ubus_call"
+SERVICE_REG_KEY = "__zte_router_service_registered"
+SERVICE_UBUS_CALL_SCHEMA = vol.Schema(
+    {
+        vol.Optional("entry_id"): cv.string,
+        vol.Required("module"): cv.string,
+        vol.Required("method"): cv.string,
+        vol.Optional("params", default={}): dict,
+    }
+)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Set up ZTE Router from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+    _ensure_services_registered(hass)
 
     # Merge entry.data with entry.options. entry.options will override any values in entry.data.
     config = {**entry.data, **entry.options}
@@ -21,7 +45,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     #sms_check_interval = config.get("sms_check_interval", 100)
     ping_interval = entry.options.get("ping_interval", 60)
     sms_check_interval = entry.options.get("sms_check_interval", 100)
-    router_type = config.get("router_type", "MC801A")
+    router_type = config.get("router_type", ROUTER_TYPE_MC801)
     username = config.get("router_username") if router_type in ["MC888A", "MC889A"] else None
 
     phone_number = config.get("phone_number", "13909")
@@ -33,9 +57,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     # Initialize coordinators with username if applicable
     allow_stale_data = config.get(CONF_ALLOW_STALE_DATA, DEFAULT_ALLOW_STALE_DATA)
     coordinator = ZTERouterDataUpdateCoordinator(
-        hass, config["router_ip"], config["router_password"], username, ping_interval, allow_stale_data
+        hass, config["router_ip"], config["router_password"], username, router_type, ping_interval, allow_stale_data
     )
-    sms_coordinator = ZTERouterSMSUpdateCoordinator(hass, config["router_ip"], config["router_password"], username, sms_check_interval)
+    coordinator.config_entry = entry
+    sms_coordinator = ZTERouterSMSUpdateCoordinator(
+        hass, config["router_ip"], config["router_password"], username, router_type, sms_check_interval
+    )
 
     await coordinator.async_config_entry_first_refresh()
     await sms_coordinator.async_config_entry_first_refresh()
@@ -221,3 +248,68 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
 async def update_listener(hass: HomeAssistant, entry: ConfigEntry):
     """Handle options update."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+def _ensure_services_registered(hass: HomeAssistant) -> None:
+    storage = hass.data.setdefault(DOMAIN, {})
+    if storage.get(SERVICE_REG_KEY):
+        return
+
+    async def async_handle_ubus_call(call: ServiceCall):
+        entry_id = call.data.get("entry_id")
+        active_entries = [
+            eid for eid in hass.data[DOMAIN]
+            if isinstance(hass.data[DOMAIN].get(eid), dict)
+        ]
+        if not entry_id:
+            if len(active_entries) == 1:
+                entry_id = active_entries[0]
+            else:
+                raise HomeAssistantError(
+                    "Multiple ZTE Router entries found. Specify entry_id in the service call."
+                )
+        if entry_id not in hass.data[DOMAIN]:
+            raise HomeAssistantError(f"Unknown ZTE Router entry_id: {entry_id}")
+
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None:
+            raise HomeAssistantError(f"No config entry found for id {entry_id}")
+
+        merged = {**entry.data, **entry.options}
+        router_type = merged.get("router_type", ROUTER_TYPE_MC801)
+        if router_type != ROUTER_TYPE_G5_ULTRA:
+            raise HomeAssistantError("The ubus_call service is only available for G5 Ultra router entries.")
+
+        module = call.data["module"]
+        method = call.data["method"]
+        params = call.data.get("params") or {}
+        runner = G5UltraRouterRunner(merged["router_ip"], merged["router_password"])
+        try:
+            response = await hass.async_add_executor_job(
+                runner.call_module_method,
+                module,
+                method,
+                params,
+            )
+        except Exception as err:
+            raise HomeAssistantError(f"Failed executing ubus call {module}.{method}: {err}") from err
+
+        hass.bus.async_fire(
+            f"{DOMAIN}_ubus_response",
+            {
+                "entry_id": entry_id,
+                "module": module,
+                "method": method,
+                "params": params,
+                "result": response.get("result"),
+                "raw": response.get("raw"),
+            },
+        )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_UBUS_CALL,
+        async_handle_ubus_call,
+        schema=SERVICE_UBUS_CALL_SCHEMA,
+    )
+    storage[SERVICE_REG_KEY] = True

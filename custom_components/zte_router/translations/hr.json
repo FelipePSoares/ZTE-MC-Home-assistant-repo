@@ -62,5 +62,29 @@
                 }
             }
         }
+    },
+    "services": {
+        "ubus_call": {
+            "name": "Pozovi G5 Ultra ubus metodu",
+            "description": "Izvrši ubus modul/metodu na konfiguriranom G5 Ultra ruteru.",
+            "fields": {
+                "entry_id": {
+                    "name": "ID unosa",
+                    "description": "ID konfiguracije kada je dodano više rutera."
+                },
+                "module": {
+                    "name": "Modul",
+                    "description": "Naziv ubus objekta (modula) koji se poziva."
+                },
+                "method": {
+                    "name": "Metoda",
+                    "description": "Metoda/funkcija koju treba pozvati unutar modula."
+                },
+                "params": {
+                    "name": "Parametri",
+                    "description": "Opcionalni JSON rječnik koji se prosljeđuje kao parametri."
+                }
+            }
+        }
     }
 }

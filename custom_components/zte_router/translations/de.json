@@ -62,5 +62,29 @@
                 }
             }
         }
+    },
+    "services": {
+        "ubus_call": {
+            "name": "G5 Ultra ubus-Methode aufrufen",
+            "description": "Führe ein ubus-Modul bzw. eine Methode auf einem konfigurierten G5 Ultra Router aus.",
+            "fields": {
+                "entry_id": {
+                    "name": "Eintrags-ID",
+                    "description": "Spezifische Konfiguration-ID, wenn mehrere Router eingerichtet sind."
+                },
+                "module": {
+                    "name": "Modul",
+                    "description": "Name des ubus-Objekts (Moduls), das aufgerufen werden soll."
+                },
+                "method": {
+                    "name": "Methode",
+                    "description": "Methode/Funktion, die innerhalb des Moduls ausgeführt werden soll."
+                },
+                "params": {
+                    "name": "Parameter",
+                    "description": "Optionales JSON-Objekt, das als Parameter übergeben wird."
+                }
+            }
+        }
     }
 }

@@ -1,7 +1,6 @@
 import json
 import time
 import logging
-import subprocess
 import asyncio
 from datetime import datetime, timedelta
 from homeassistant.helpers.entity_registry import async_get
@@ -12,10 +11,26 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import PlatformNotReady
 from .const import (
-    DOMAIN, SENSOR_NAMES, MANUFACTURER, MODEL, UNITS,
-    DISABLED_SENSORS_MC889, DISABLED_SENSORS_MC888, DISABLED_SENSORS_MC801A,
-    DIAGNOSTICS_SENSORS,FLUX_KEYS, FLUX_ICON_MAP,CONF_ALLOW_STALE_DATA, DEFAULT_ALLOW_STALE_DATA
+    DOMAIN,
+    SENSOR_NAMES,
+    MANUFACTURER,
+    MODEL,
+    UNITS,
+    DISABLED_SENSORS_MC889,
+    DISABLED_SENSORS_MC888,
+    DISABLED_SENSORS_MC801A,
+    DISABLED_SENSORS_G5_ULTRA,
+    DIAGNOSTICS_SENSORS,
+    FLUX_KEYS,
+    FLUX_ICON_MAP,
+    CONF_ALLOW_STALE_DATA,
+    DEFAULT_ALLOW_STALE_DATA,
+    ROUTER_TYPE_MC801,
+    ROUTER_TYPE_MC888,
+    ROUTER_TYPE_MC889,
+    ROUTER_TYPE_G5_ULTRA,
 )
+from .router_backend import run_router_commands
 _LOGGER = logging.getLogger(__name__)
 
 def guard_stale_data(update_func):
@@ -41,7 +56,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     sms_coordinator = coordinators["sms_coordinator"]
 
     config = {**entry.data, **entry.options}
-    router_type = entry.data.get("router_type", "MC801A")
+    router_type = entry.data.get("router_type", ROUTER_TYPE_MC801)
     enable_flux = config.get("enable_flux_sensors", True)
 
     # Extract required config values
@@ -51,8 +66,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     sms_check_interval = config.get("sms_check_interval", 100)
 
     disabled_sensors = {
-        "MC889": DISABLED_SENSORS_MC889,
-        "MC888": DISABLED_SENSORS_MC888
+        ROUTER_TYPE_MC889: DISABLED_SENSORS_MC889,
+        ROUTER_TYPE_MC888: DISABLED_SENSORS_MC888,
+        ROUTER_TYPE_G5_ULTRA: DISABLED_SENSORS_G5_ULTRA,
     }.get(router_type, DISABLED_SENSORS_MC801A)
 
     sensors = []
@@ -73,7 +89,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     handled_keys.update(["station_list", "lan_station_list", "all_devices"])
 
     # Create and store the SMS coordinator (if not already created)
-    sms_coordinator = ZTERouterSMSUpdateCoordinator(hass, ip, pwd, user, sms_check_interval)
+    sms_coordinator = ZTERouterSMSUpdateCoordinator(hass, ip, pwd, user, router_type, sms_check_interval)
     await sms_coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id]["sms_coordinator"] = sms_coordinator
 
@@ -133,10 +149,12 @@ def extract_json(output):
         return "{}"
 
 class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, ip, pwd, user, interval, allow_stale_data=True):
+    def __init__(self, hass, ip, pwd, user, router_type, interval, allow_stale_data=True):
         self.ip_entry = ip
         self.password_entry = pwd
         self.username_entry = user
+        self.router_type = router_type
+        self.config_entry = None
         self._data = {}
         self.allow_stale_data = allow_stale_data
         _LOGGER.info(f"Initializing ZTERouterDataUpdateCoordinator with Ping check interval: {interval} seconds")
@@ -151,9 +169,7 @@ class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
         cmds = ','.join(map(str, keys.keys()))
 
         try:
-            raw = await self.hass.async_add_executor_job(
-                self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, cmds
-            )
+            raw = await self.hass.async_add_executor_job(self.run_router_script, cmds)
             parsed = json.loads(extract_json(raw))
             #_LOGGER.warning(f"_____DATA {parsed}")
             if parsed:
@@ -180,27 +196,33 @@ class ZTERouterDataUpdateCoordinator(DataUpdateCoordinator):
         return self._data
 
 
-    def run_mc_script(self, ip, pwd, user, cmd, retries=3, delay=2):
+    def run_router_script(self, cmd):
         attempt = 0
+        retries = 3
+        delay = 2
         while attempt < retries:
-            #_LOGGER.warning(f"Fetching data attempt: {attempt}, cmd: {cmd}")
             try:
-                cmdline = ["python3", "/config/custom_components/zte_router/mc.py", str(ip), str(pwd), str(cmd), str(user or "")]
-                result = subprocess.run(cmdline, capture_output=True, text=True, check=True)
-                return result.stdout
-            except subprocess.CalledProcessError as e:
+                return run_router_commands(
+                    self.router_type,
+                    self.ip_entry,
+                    self.password_entry,
+                    self.username_entry,
+                    str(cmd),
+                )
+            except Exception as err:
                 attempt += 1
                 if attempt < retries:
                     time.sleep(delay)
                     delay *= 2
                 else:
-                    raise e
+                    raise err
 
 class ZTERouterSMSUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, ip, password_entry, username_entry, sms_check_interval):
+    def __init__(self, hass, ip, password_entry, username_entry, router_type, sms_check_interval):
         self.ip_entry = ip
         self.password_entry = password_entry
         self.username_entry = username_entry if username_entry else ""
+        self.router_type = router_type
         self._data = {}
         _LOGGER.info(f"Initializing SMSUpdateCoordinator with SMS check interval: {sms_check_interval} seconds")
         super().__init__(
@@ -217,9 +239,7 @@ class ZTERouterSMSUpdateCoordinator(DataUpdateCoordinator):
         cmds = ','.join(map(str, keys.keys()))
 
         try:
-            raw = await self.hass.async_add_executor_job(
-                self.run_mc_script, self.ip_entry, self.password_entry, self.username_entry, cmds
-            )
+            raw = await self.hass.async_add_executor_job(self.run_router_script, cmds)
             parsed = json.loads(extract_json(raw))
             _LOGGER.debug(f"SMS parsed data: {parsed}")
             if parsed:
@@ -241,35 +261,17 @@ class ZTERouterSMSUpdateCoordinator(DataUpdateCoordinator):
 
         return self._data
 
-    def run_mc_script(self, ip, password, username, command):
-        #_LOGGER.info(f"Running mc.py script for SMS command {command}")
+    def run_router_script(self, command):
         try:
-            # Ensure username is a string; use an empty string if None
-            username = username or ""
-            cmd = [
-                "python3",
-                "/config/custom_components/zte_router/mc.py",
-                ip,
-                password,
+            return run_router_commands(
+                self.router_type,
+                self.ip_entry,
+                self.password_entry,
+                self.username_entry,
                 str(command),
-                username  # Include username if applicable
-            ]
-            # Mask only the password for logging
-            def mask_command(cmd, sensitive_indices):
-                masked = cmd.copy()
-                for i in sensitive_indices:
-                    if 0 <= i < len(masked):
-                        masked[i] = "*****"
-                return masked
-
-            masked_cmd = mask_command(cmd, [3])
-            _LOGGER.info("Executing command: %s", masked_cmd)
-
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            _LOGGER.debug(f"Output for SMS command {command}: {result.stdout}")
-            return result.stdout
-        except subprocess.CalledProcessError as e:
-            _LOGGER.error(f"Error running SMS command {command}: {e}")
+            )
+        except Exception as err:
+            _LOGGER.error(f"Error running SMS command {command}: {err}")
             raise
 
 class ZTERouterEntity(RestoreEntity, Entity):
@@ -412,6 +414,13 @@ class ZTERouterSensor(ZTERouterEntity):
                         f"Sensor '{self._name}' state unchanged."
                     )
 
+            elif isinstance(new_state, (int, float, bool)):
+                if new_state != old_state:
+                    self._state = new_state
+                    state_changed = True
+                    _LOGGER.info(
+                        f"Sensor '{self._name}' updated. Old state: {old_state}, New state: {self._state}"
+                    )
             else:
                 _LOGGER.debug(
                     f"Invalid value type for key '{self._key}' in coordinator data: {type(new_state)}"
@@ -432,7 +441,7 @@ class LastSMSSensor(ZTERouterEntity):
         self._name = "Last SMS"
 
         # Gracefully handle missing or incomplete sms_data
-        self._state = sms_data.get("id", None)  # Show as None if no ID yet
+        self._state = self._derive_state_value(sms_data)
         self._attributes = {}
 
         # Copy all valid keys except "id" to attributes
@@ -500,8 +509,8 @@ class LastSMSSensor(ZTERouterEntity):
         old_state = self._state
         sms_data = self.coordinator.data.get("sms_data", {})
         _LOGGER.debug(f"Updating LastSMS sensor with new data: {sms_data}")
-        if sms_data and "id" in sms_data:
-            self._state = sms_data.get("id", "NO DATA")
+        if sms_data:
+            self._state = self._derive_state_value(sms_data)
             self._attributes = {k: v for k, v in sms_data.items() if k != "id"}
             self._attributes["content"] = sms_data.get("content", "NO CONTENT")
             if "date" in self._attributes:
@@ -509,7 +518,7 @@ class LastSMSSensor(ZTERouterEntity):
             _LOGGER.info(f"Last SMS sensor updated. Old state: {old_state}, New state: {self._state}")
         else:
             _LOGGER.warning("Last SMS sensor: No valid data or update failed. Setting state to Unavailable")
-            self._state = None
+            self._state = "UNKNOWN"
         self.async_write_ha_state()
 
     def format_date(self, date_str):
@@ -540,6 +549,21 @@ class LastSMSSensor(ZTERouterEntity):
         except ValueError as e:
             _LOGGER.error(f"Error parsing date string {date_str}: {e}")
             return date_str
+
+    @staticmethod
+    def _derive_state_value(sms_payload):
+        if not sms_payload:
+            return "NO DATA"
+        candidate = sms_payload.get("id")
+        if candidate in (None, ""):
+            fallback = sms_payload.get("content") or sms_payload.get("timestamp") or sms_payload.get("date")
+            if isinstance(fallback, str):
+                candidate = fallback.strip()[:255] or "NO DATA"
+            elif fallback is not None:
+                candidate = str(fallback)
+            else:
+                candidate = "NO DATA"
+        return str(candidate)
 #fixed indent outside of a class
 def format_ca_bands(ca_bands, nr5g_action_band):
     _LOGGER.debug(f"Raw ca_bands input: {ca_bands}")
@@ -558,17 +582,22 @@ def format_ca_bands(ca_bands, nr5g_action_band):
         band_info = band.split(',')
         _LOGGER.debug(f"Parsing CA band string: {band} -> split: {band_info}")
 
-        if len(band_info) >= 6:
-            try:
+        try:
+            if len(band_info) >= 6:
                 band_id = band_info[3]
                 bandwidth = band_info[5]
-                formatted_band = f"B{band_id}@{bandwidth}MHz"
-                ca_bands_formatted.append(formatted_band)
-                _LOGGER.debug(f"Formatted band: {formatted_band}")
-            except Exception as e:
-                _LOGGER.warning(f"Failed to format band '{band}' due to: {e}")
-        else:
-            _LOGGER.warning(f"Band info has insufficient parts: {band_info}")
+            elif len(band_info) >= 5:
+                band_id = band_info[0]
+                bandwidth = band_info[4]
+            else:
+                _LOGGER.warning(f"Band info has insufficient parts: {band_info}")
+                continue
+
+            formatted_band = f"B{band_id}@{bandwidth}MHz"
+            ca_bands_formatted.append(formatted_band)
+            _LOGGER.debug(f"Formatted band: {formatted_band}")
+        except Exception as e:
+            _LOGGER.warning(f"Failed to format band '{band}' due to: {e}")
 
     if nr5g_action_band:
         ca_bands_formatted.append(nr5g_action_band)
@@ -577,6 +606,43 @@ def format_ca_bands(ca_bands, nr5g_action_band):
     formatted_result = "+".join(ca_bands_formatted)
     _LOGGER.debug(f"Final formatted CA bands string: {formatted_result}")
     return formatted_result
+
+
+def derive_primary_band_from_lteca(lteca: str):
+    if not lteca:
+        return None
+    chunks = [chunk for chunk in lteca.strip(";").split(";") if chunk]
+    if not chunks:
+        return None
+    first = chunks[0].split(",")
+    if len(first) >= 5:
+        return {
+            "band": first[0],
+            "bandwidth": first[4],
+        }
+    return None
+
+def calculate_enodeb_id(cell_id_value):
+    if not cell_id_value:
+        return ""
+    try:
+        if isinstance(cell_id_value, str):
+            stripped = cell_id_value.strip()
+            if not stripped:
+                return ""
+            lower = stripped.lower()
+            if lower.startswith("0x"):
+                numeric = int(lower, 16)
+            elif any(ch in lower for ch in "abcdef"):
+                numeric = int(lower, 16)
+            else:
+                numeric = int(lower, 10)
+        else:
+            numeric = int(cell_id_value)
+        return numeric // 256
+    except (ValueError, TypeError):
+        _LOGGER.debug("Unable to derive eNB ID from cell_id %s", cell_id_value)
+        return ""
 
 class ConnectedBandsSensor(ZTERouterEntity):
     def __init__(self, coordinator, disabled_by_default=False):
@@ -640,19 +706,30 @@ class ConnectedBandsSensor(ZTERouterEntity):
             data = self.coordinator.data
             rmcc = data.get("rmcc", "")
             rmnc = data.get("rmnc", "")
-            cell_id = data.get("cell_id", "")
+            cell_id_raw = data.get("cell_id", "")
+            cell_id = "" if cell_id_raw in (None, "") else str(cell_id_raw)
             wan_ip = data.get("wan_ipaddr", "")
             main_band = data.get("lte_ca_pcell_band", "")
             main_bandwidth = data.get("lte_ca_pcell_bandwidth", "")
-            ca_bands = data.get("lte_multi_ca_scell_info", "")
+            ca_bands = (
+                data.get("lte_multi_ca_scell_info")
+                or data.get("lte_multi_ca_scell_sig_info")
+                or ""
+            )
+            if not ca_bands and data.get("lteca"):
+                ca_bands = data.get("lteca")
             ca_bands_formatted = format_ca_bands(ca_bands, data.get("nr5g_action_band", ""))
 
+            if getattr(self.coordinator, "router_type", None) == ROUTER_TYPE_G5_ULTRA:
+                lteca_block = data.get("lteca", "")
+                if (not main_band or not main_bandwidth) and lteca_block:
+                    primary = derive_primary_band_from_lteca(lteca_block)
+                    if primary:
+                        main_band = primary.get("band", main_band)
+                        main_bandwidth = primary.get("bandwidth", main_bandwidth)
+
             # Calculate enbid
-            try:
-                enb_id = int(cell_id, 16) // 256 if cell_id else ""
-            except ValueError:
-                _LOGGER.error(f"Invalid cell_id for conversion to int: {cell_id}")
-                enb_id = ""
+            enb_id = calculate_enodeb_id(cell_id_raw if cell_id_raw not in ("", None) else cell_id)
 
             if main_band and main_bandwidth:
                 self._state = f"MAIN:B{main_band}@{main_bandwidth}MHz CA:{ca_bands_formatted}"
@@ -666,7 +743,7 @@ class ConnectedBandsSensor(ZTERouterEntity):
                 "wan_ip": wan_ip or "--",
                 "main_band": main_band or "--",
                 "main_bandwidth": main_bandwidth or "--",
-                "ca_bands": ca_bands or "--",
+                "ca_bands": ca_bands_formatted or "--",
                 "enb_id": enb_id or "--",
             }
             _LOGGER.info(f"Connected Bands sensor updated. Old state: {old_state}, New state: {self._state}")
@@ -880,8 +957,9 @@ class DataLeftSensor(ZTERouterEntity):
         self.coordinator = coordinator
         self._name = "Data Left"
         self._state = None
-        self.entity_registry_enabled_default = True  # Set to True, enabled by default
-        self._attr_should_poll = False  # Disable default polling
+        self.entity_registry_enabled_default = True
+        self._attr_should_poll = False
+        self._attr_is_diagnostics = True
         _LOGGER.info(f"Initializing Data Left sensor")
 
     @property
@@ -916,11 +994,11 @@ class DataLeftSensor(ZTERouterEntity):
 
     @property
     def is_diagnostics(self):
-        return False  # DataLeft is not a diagnostic sensor
+        return True
 
     @property
     def entity_category(self):
-        return None
+        return EntityCategory.DIAGNOSTIC
 
     async def async_update(self):
         _LOGGER.info(f"Manual update requested for Data Left sensor at {datetime.now()}")

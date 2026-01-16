@@ -62,5 +62,29 @@
                 }
             }
         }
+    },
+    "services": {
+        "ubus_call": {
+            "name": "Llamar mA©todo ubus G5 Ultra",
+            "description": "Ejecuta un mA?dulo/mA©todo ubus en un router G5 Ultra configurado.",
+            "fields": {
+                "entry_id": {
+                    "name": "ID de entrada",
+                    "description": "ID de configuraciA?n cuando hay varios routers."
+                },
+                "module": {
+                    "name": "MA?dulo",
+                    "description": "Nombre del objeto ubus (mA?dulo) que se desea invocar."
+                },
+                "method": {
+                    "name": "MA©todo",
+                    "description": "MA©todo/funciA?n que se ejecutarA? dentro del mA?dulo."
+                },
+                "params": {
+                    "name": "ParA?metros",
+                    "description": "Diccionario JSON opcional que se pasa como parA?metros."
+                }
+            }
+        }
     }
 }

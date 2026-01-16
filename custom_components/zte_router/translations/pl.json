@@ -62,5 +62,29 @@
                 }
             }
         }
+    },
+    "services": {
+        "ubus_call": {
+            "name": "WywoAaj metodA ubus G5 Ultra",
+            "description": "Wykonuje moduA/metodA ubus na skonfigurowanym routerze G5 Ultra.",
+            "fields": {
+                "entry_id": {
+                    "name": "ID wpisu",
+                    "description": "Identyfikator konfiguracji, gdy dodano wiAcej routerA3w."
+                },
+                "module": {
+                    "name": "ModuA",
+                    "description": "Nazwa obiektu ubus (moduAu), ktA3ry ma zostaA? wywoAany."
+                },
+                "method": {
+                    "name": "Metoda",
+                    "description": "Metoda/funkcja wykonywana w ramach moduAu."
+                },
+                "params": {
+                    "name": "Parametry",
+                    "description": "Opcjonalny sAownik JSON przekazywany jako parametry."
+                }
+            }
+        }
     }
 }
