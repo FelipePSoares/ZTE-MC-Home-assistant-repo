@@ -1,12 +1,13 @@
 import logging
 import subprocess
+from pathlib import Path
 from typing import Optional
 
 from .const import ROUTER_TYPE_G5_ULTRA
 from .g5_ultra_client import G5UltraRouterRunner
 
 LOGGER = logging.getLogger(__name__)
-MC_SCRIPT_PATH = "/config/custom_components/zte_router/mc.py"
+MC_SCRIPT_PATH = str(Path(__file__).resolve().with_name("mc.py"))
 
 
 def run_router_commands(
