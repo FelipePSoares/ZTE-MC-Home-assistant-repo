@@ -422,7 +422,18 @@ class G5UltraRouterRunner:
     def collect_wireless_clients(self, token: str, counts: Dict[str, Any]) -> List[Dict[str, Any]]:
         total = int(counts.get("wireless_num", 0) or 0)
         if total <= 0:
-            return []
+            # Some firmware revisions report wrong counters; probe one page anyway.
+            resp = self._ubus_call(
+                "zwrt_router.api",
+                "router_wireless_access_list",
+                {"start_id": 1, "end_id": 64},
+                token,
+            )
+            data = self._safe_result(resp)
+            info = data.get("wireless_access_list_info") if isinstance(data, dict) else None
+            records = info if isinstance(info, list) else []
+            LOGGER.debug("Collected %s wireless clients via fallback", len(records))
+            return records
         page_size = 64
         start = 1
         records: List[Dict[str, Any]] = []

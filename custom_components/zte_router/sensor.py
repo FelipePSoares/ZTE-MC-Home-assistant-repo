@@ -1122,7 +1122,7 @@ class ConnectedDevicesSensor(ZTERouterEntity):
 
     @property
     def state(self):
-        return len(self._attributes.get("station_list", []))
+        return self._state
 
     @property
     def unique_id(self):
@@ -1158,8 +1158,24 @@ class ConnectedDevicesSensor(ZTERouterEntity):
     async def async_handle_coordinator_update(self):
         if self.coordinator.data:
             station_list = self.coordinator.data.get("station_list", [])
+            lan_station_list = self.coordinator.data.get("lan_station_list", [])
+            all_devices = self.coordinator.data.get("all_devices")
+
+            if isinstance(all_devices, list) and all_devices:
+                total_devices = len(all_devices)
+            else:
+                total_devices = len(station_list) + len(lan_station_list)
+                if total_devices == 0:
+                    try:
+                        total_devices = int(str(self.coordinator.data.get("wifi_access_sta_num", "0")).strip())
+                    except Exception:
+                        total_devices = 0
+
+            self._state = total_devices
             self._attributes["station_list"] = station_list
-            _LOGGER.info(f"Connected Devices updated: {len(station_list)} devices")
+            self._attributes["lan_station_list"] = lan_station_list
+            self._attributes["all_devices"] = all_devices if isinstance(all_devices, list) else (station_list + lan_station_list)
+            _LOGGER.info(f"Connected Devices updated: {total_devices} devices")
         else:
             _LOGGER.warning("No data available for Connected Devices")
         self.async_write_ha_state()
@@ -1180,7 +1196,7 @@ class WiFiClientsSensor(ZTERouterEntity):
 
     @property
     def state(self):
-        return len(self._attributes.get("wifi_clients", []))
+        return self._state
 
     @property
     def unique_id(self):
@@ -1214,28 +1230,44 @@ class WiFiClientsSensor(ZTERouterEntity):
 
     @guard_stale_data
     async def async_handle_coordinator_update(self):
-        wifi_clients = self.coordinator.data.get("station_list") if self.coordinator.data else None
+        data = self.coordinator.data if self.coordinator.data else {}
+        wifi_clients = data.get("station_list") or []
 
-        if wifi_clients is not None:
-            self._state = len(wifi_clients)
-            formatted_clients = []
-            for client in wifi_clients:
-                formatted_clients.append({
-                    "Hostname": client.get("hostname", "--"),
-                    "MAC Address": client.get("mac_addr", "--"),
-                    "IP Address": client.get("ip_addr", "--"),
-                    "Speed": f"{client.get('agreed_rate', '--')} Mbps",
-                    "Connected": format_seconds(client.get("connect_time", 0)),
-                    "Address Type": client.get("addr_type", "--"),
-                    "Type": client.get("type", "--"),
-                })
+        formatted_clients = []
+        for client in wifi_clients:
+            formatted_clients.append({
+                "Hostname": client.get("hostname", "--"),
+                "MAC Address": client.get("mac_addr", client.get("mac", "--")),
+                "IP Address": client.get("ip_addr", client.get("ip", "--")),
+                "Speed": f"{client.get('agreed_rate', client.get('speed', '--'))} Mbps",
+                "Connected": format_seconds(client.get("connect_time", client.get("online_time", 0))),
+                "Address Type": client.get("addr_type", client.get("address_type", "--")),
+                "Type": client.get("type", "WiFi"),
+            })
+
+        # Firmware BD_A1EUMC888AV1.0.0B06 may not expose station_list reliably.
+        if formatted_clients:
+            self._state = len(formatted_clients)
             self._attributes["wifi_clients"] = formatted_clients
-            _LOGGER.info(f"WiFi Clients sensor updated: {self._state} devices")
         else:
-            _LOGGER.warning("WiFi Clients sensor: No data available or update failed. Setting state to unavailable.")
-            self._state = None
-            self._attributes.clear()
+            def _as_int(value):
+                try:
+                    return int(str(value).strip())
+                except Exception:
+                    return 0
 
+            fallback_count = max(
+                _as_int(data.get("wifi_access_sta_num")),
+                _as_int(data.get("wifi_chip1_ssid1_access_sta_num")) +
+                _as_int(data.get("wifi_chip2_ssid1_access_sta_num")) +
+                _as_int(data.get("wifi_chip1_ssid2_access_sta_num")) +
+                _as_int(data.get("wifi_chip2_ssid2_access_sta_num")),
+            )
+            self._state = fallback_count
+            self._attributes["wifi_clients"] = []
+            self._attributes["fallback_count_source"] = "wifi_access_sta_num"
+
+        _LOGGER.info(f"WiFi Clients sensor updated: {self._state} devices")
         self.async_write_ha_state()
 
 
@@ -1255,7 +1287,7 @@ class LANClientsSensor(ZTERouterEntity):
 
     @property
     def state(self):
-        return len(self._attributes.get("lan_clients", []))
+        return self._state
 
     @property
     def available(self):
@@ -1289,28 +1321,24 @@ class LANClientsSensor(ZTERouterEntity):
 
     @guard_stale_data
     async def async_handle_coordinator_update(self):
-        lan_clients = self.coordinator.data.get("lan_station_list") if self.coordinator.data else None
+        data = self.coordinator.data if self.coordinator.data else {}
+        lan_clients = data.get("lan_station_list") or []
 
-        if lan_clients is not None:
-            self._state = len(lan_clients)
-            formatted_clients = []
-            for client in lan_clients:
-                formatted_clients.append({
-                    "Hostname": client.get("hostname", "--"),
-                    "MAC Address": client.get("mac_addr", "--"),
-                    "IP Address": client.get("ip_addr", "--"),
-                    "Speed": f"{client.get('agreed_rate', '--')} Mbps",
-                    "Connected": format_seconds(client.get("connect_time", 0)),
-                    "Address Type": client.get("addr_type", "--"),
-                    "Type": client.get("type", "--"),
-                })
-            self._attributes["lan_clients"] = formatted_clients
-            _LOGGER.info(f"LAN Clients sensor updated: {self._state} devices")
-        else:
-            _LOGGER.warning("LAN Clients sensor: No data available or update failed. Setting state to unavailable.")
-            self._state = None
-            self._attributes.clear()
+        formatted_clients = []
+        for client in lan_clients:
+            formatted_clients.append({
+                "Hostname": client.get("hostname", "--"),
+                "MAC Address": client.get("mac_addr", client.get("mac", "--")),
+                "IP Address": client.get("ip_addr", client.get("ip", "--")),
+                "Speed": f"{client.get('agreed_rate', client.get('speed', '--'))} Mbps",
+                "Connected": format_seconds(client.get("connect_time", client.get("online_time", 0))),
+                "Address Type": client.get("addr_type", client.get("address_type", "--")),
+                "Type": client.get("type", "LAN"),
+            })
 
+        self._state = len(formatted_clients)
+        self._attributes["lan_clients"] = formatted_clients
+        _LOGGER.info(f"LAN Clients sensor updated: {self._state} devices")
         self.async_write_ha_state()
 
 
