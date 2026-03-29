@@ -98,6 +98,8 @@ def _device_connection_type(dev: dict) -> str:
 
 def _all_devices(data: dict) -> list[dict]:
     """Merge known client lists and de-duplicate by MAC."""
+    if not data:
+        return []
     seen: set[str] = set()
     devices: list[dict] = []
     for key in ("all_devices", "station_list", "lan_station_list"):
