@@ -16,6 +16,8 @@ from .const import (
     CONF_ALLOW_STALE_DATA,
     DEFAULT_ALLOW_STALE_DATA,
     ROUTER_TYPE_MC801,
+    ROUTER_TYPE_MC888,
+    ROUTER_TYPE_MC889,
     ROUTER_TYPE_G5_ULTRA,
 )
 from .g5_ultra_client import G5UltraRouterRunner
@@ -46,7 +48,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     ping_interval = entry.options.get("ping_interval", 60)
     sms_check_interval = entry.options.get("sms_check_interval", 100)
     router_type = config.get("router_type", ROUTER_TYPE_MC801)
-    username = config.get("router_username") if router_type in ["MC888A", "MC889A"] else None
+    username = config.get("router_username") if router_type in [ROUTER_TYPE_MC888, ROUTER_TYPE_MC889] else None
 
     phone_number = config.get("phone_number", "13909")
     sms_message = config.get("sms_message", "BRZINA")
@@ -82,7 +84,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     firmware_version = coordinator.data.get("wa_inner_version", "Unknown")
 
     # Forward entry setup to relevant platforms, including button
-    await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "switch", "button"])
+    await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "switch", "button", "device_tracker"])
 
     entry.async_on_unload(entry.add_update_listener(update_listener))
 
@@ -242,6 +244,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     await hass.config_entries.async_forward_entry_unload(entry, "sensor")
     await hass.config_entries.async_forward_entry_unload(entry, "switch")
     await hass.config_entries.async_forward_entry_unload(entry, "button")
+    await hass.config_entries.async_forward_entry_unload(entry, "device_tracker")
     hass.data[DOMAIN].pop(entry.entry_id)
     return True
 

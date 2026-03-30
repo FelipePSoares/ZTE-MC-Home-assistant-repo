@@ -633,6 +633,35 @@ class zteRouter:
 
             combined_data = {}
 
+            def normalize_client_list(raw_value):
+                """Normalize firmware-specific list payloads to list[dict]."""
+                if isinstance(raw_value, list):
+                    return [item for item in raw_value if isinstance(item, dict)]
+
+                if isinstance(raw_value, str):
+                    text = raw_value.strip()
+                    if not text or text.lower() in ("null", "none", "[]"):
+                        return []
+                    try:
+                        decoded = json.loads(text)
+                        if isinstance(decoded, list):
+                            return [item for item in decoded if isinstance(item, dict)]
+                        if isinstance(decoded, dict):
+                            for nested_key in ("list", "items", "devices", "clients"):
+                                nested = decoded.get(nested_key)
+                                if isinstance(nested, list):
+                                    return [item for item in nested if isinstance(item, dict)]
+                    except Exception:
+                        return []
+
+                if isinstance(raw_value, dict):
+                    for nested_key in ("list", "items", "devices", "clients"):
+                        nested = raw_value.get(nested_key)
+                        if isinstance(nested, list):
+                            return [item for item in nested if isinstance(item, dict)]
+
+                return []
+
             for param in ["station_list", "lan_station_list"]:
                 cmd_str = quote(param)
                 url = f"{self.protocol}://{self.ip}/goform/goform_get_cmd_process?isTest=false&cmd={cmd_str}"
@@ -644,12 +673,29 @@ class zteRouter:
                 try:
                     parsed = json.loads(raw_data)
 
+                    raw_clients = parsed.get(param, [])
+                    clients = normalize_client_list(raw_clients)
+
+                    # Firmware fallback keys
+                    if not clients:
+                        alt_candidates = [
+                            "wireless_access_list_info" if param == "station_list" else "lan_access_list_info",
+                            "clients",
+                            "devices",
+                            "list",
+                            "items",
+                        ]
+                        for alt_key in alt_candidates:
+                            clients = normalize_client_list(parsed.get(alt_key, []))
+                            if clients:
+                                break
+
                     # Tag each device with type: WiFi or LAN
-                    for item in parsed.get(param, []):
+                    for item in clients:
                         item["type"] = "WiFi" if param == "station_list" else "LAN"
 
-                    combined_data[param] = parsed.get(param, [])
-                    logger.debug(f"Fetched {param} with {len(parsed.get(param, []))} entries")
+                    combined_data[param] = clients
+                    logger.debug(f"Fetched {param} with {len(clients)} entries")
                 except Exception as ex:
                     logger.warning(f"Failed to parse {param}: {ex}")
                     combined_data[param] = []
